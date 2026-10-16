@@ -26,7 +26,7 @@ OUT="$DIST/${APP_NAME}-${VERSION}.dmg"
 echo "▸ 先构建 app…"
 bash "$HERE/build-app.sh"
 
-APP="$HOME/Applications/${APP_NAME}.app"
+APP="/Applications/${APP_NAME}.app"
 [ -d "$APP" ] || { echo "✗ 找不到 $APP"; exit 1; }
 
 echo "▸ 准备 DMG 内容…"

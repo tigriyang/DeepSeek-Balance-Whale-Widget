@@ -10,8 +10,7 @@
          崩溃后 KeepAlive 才能可靠拉起。 -->
     <key>ProgramArguments</key>
     <array>
-        <!-- __HOME__ 由 install.sh 在安装时替换成实际的家目录 -->
-        <string>__HOME__/Applications/WhaleFloat.app/Contents/MacOS/WhaleFloat</string>
+        <string>/Applications/WhaleFloat.app/Contents/MacOS/WhaleFloat</string>
     </array>
 
     <key>RunAtLoad</key>
@@ -24,6 +23,16 @@
     <dict>
         <key>SuccessfulExit</key>
         <false/>
+    </dict>
+
+    <!-- 程序不存在时自动卸载本配置。
+         这条是「拖到废纸篓即卸载」的关键：用户把 app 拖进废纸篓后，
+         路径消失，launchd 会自己停掉并卸下这个 job ——
+         否则 KeepAlive 会一直尝试拉起一个不存在的程序，日志刷错误。 -->
+    <key>PathState</key>
+    <dict>
+        <key>/Applications/WhaleFloat.app</key>
+        <true/>
     </dict>
 
     <!-- GUI 程序必须在用户图形会话里跑 -->

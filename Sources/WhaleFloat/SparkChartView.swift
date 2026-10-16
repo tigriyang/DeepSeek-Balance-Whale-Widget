@@ -3,9 +3,14 @@ import Foundation
 
 /// 多轮次消耗折线图。
 ///
-/// 横轴按**真实时间**等距（不是按轮次索引）—— 按索引会把深夜里密集的几轮
-/// 和白天的稀疏轮次画得一样宽，看不出「什么时候在烧钱」。
-/// 纵轴自适应量程：消耗常在某个区间小幅波动，从 0 起会把波动压成一条直线。
+/// 坐标约定：
+///   · 横轴**固定显示最近 3 小时**（不是自适应跨度）——
+///     固定窗口才能一眼比较「这会儿比刚才烧得多不多」。
+///     右端对齐到整点，于是刻度天然落在整点。
+///   · 纵轴**从 0 起**，到本轮最大值多一点余量。
+///     从 0 起是诚实的读法：消耗从 0 涨到 1M 就是涨了 1M，
+///     截断纵轴会把小波动画成剧烈起伏，那是误导。
+///   · 纵轴带轴线与刻度，能读出大致数值。
 final class SparkChartView: NSView {
     struct Point {
         let date: Date
@@ -20,8 +25,14 @@ final class SparkChartView: NSView {
 
     override var isFlipped: Bool { true }
 
+    /// 横轴固定窗口：3 小时。
+    private static let windowSeconds: TimeInterval = 3 * 3600
+    /// 纵轴刻度条数（含 0 与顶端）。
+    private static let yTickCount = 4
+
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
+        // 左边留 52pt 给纵轴标签，底下留 24pt 给时间标签
         let inset = NSEdgeInsets(top: 14, left: 52, bottom: 24, right: 14)
         let plot = NSRect(
             x: inset.left,
@@ -29,34 +40,28 @@ final class SparkChartView: NSView {
             width: max(1, bounds.width - inset.left - inset.right),
             height: max(1, bounds.height - inset.top - inset.bottom)
         )
-        drawGrid(plot)
 
         guard points.count >= 2 else {
+            drawEmptyAxes(plot)
             drawPlaceholder(plot)
             return
         }
 
-        // ── 纵轴：自适应量程 ──
-        // 取数据范围上下各留 15% 余量；只有当数据本身**不接近 0** 时才这样放大，
-        // 否则仍从 0 起（避免把「从 0 涨到 1M」画成剧烈波动，那是误导）。
-        let values = points.map(\.value)
-        let dataMax = values.max() ?? 1
-        let dataMin = values.min() ?? 0
-        let range = max(1, dataMax - dataMin)
-        let useZeroBase = dataMin < dataMax * 0.25
-        let lo = useZeroBase ? 0 : max(0, dataMin - range * 0.15)
-        let hi = dataMax + range * 0.15
+        // ── 纵轴：0 到最大值（上端留 8% 余量，免得峰顶贴着上边框）──
+        let dataMax = points.map(\.value).max() ?? 1
+        let lo: Double = 0
+        let hi = max(1, dataMax * 1.08)
         let span = max(1, hi - lo)
 
-        // ── 横轴：范围扩展到「时辰」（2 小时）的边界 ──
-        // 这样刻度正好落在整点、每格一个时辰，不用再挑步长。
-        let chunk: TimeInterval = 2 * 3600
-        let rawT0 = points.first!.date.timeIntervalSince1970
+        // ── 横轴：固定 3 小时窗口，右端对齐到整点 ──
         let rawT1 = points.last!.date.timeIntervalSince1970
-        var t0 = floor(rawT0 / chunk) * chunk
-        var t1 = ceil(rawT1 / chunk) * chunk
-        if t1 - t0 < chunk { t1 = t0 + chunk }   // 至少显示一个时辰
-        let tSpan = max(1, t1 - t0)
+        let hour: TimeInterval = 3600
+        let t1 = ceil(rawT1 / hour) * hour
+        let t0 = t1 - Self.windowSeconds
+        let tSpan = Self.windowSeconds
+
+        drawYAxis(plot, lo: lo, hi: hi)
+        drawGrid(plot)
 
         func pos(_ i: Int) -> CGPoint {
             let ti = points[i].date.timeIntervalSince1970
@@ -66,110 +71,124 @@ final class SparkChartView: NSView {
             return CGPoint(x: x, y: y)
         }
 
-        // 填充：**贴着数据本身**，不是贴绘图区边缘。
-        // X 轴范围可能比数据宽（对齐到时辰边界），
-        // 若从 plot.minX 起填，左边会拉出一个大三角。
-        let fill = NSBezierPath()
-        fill.move(to: CGPoint(x: pos(0).x, y: plot.maxY))
-        for i in points.indices { fill.line(to: pos(i)) }
-        fill.line(to: CGPoint(x: pos(points.count - 1).x, y: plot.maxY))
-        fill.close()
-        lineColor.withAlphaComponent(0.13).setFill()
-        fill.fill()
-
-        // 折线
-        let line = NSBezierPath()
-        line.lineWidth = 1.8
-        line.lineJoinStyle = .round
-        line.lineCapStyle = .round
-        for i in points.indices {
-            let p = pos(i)
-            if i == 0 { line.move(to: p) } else { line.line(to: p) }
+        // 只画落在窗口内的点（3 小时之外的不进画面）
+        let visible = points.indices.filter {
+            let ti = points[$0].date.timeIntervalSince1970
+            return ti >= t0 && ti <= t1
         }
-        lineColor.setStroke()
-        line.stroke()
+        let idx = visible.isEmpty ? Array(points.indices.suffix(1)) : visible
 
-        // 末端点
-        let last = pos(points.count - 1)
-        lineColor.setFill()
-        NSBezierPath(ovalIn: NSRect(x: last.x - 3, y: last.y - 3, width: 6, height: 6)).fill()
+        // 填充：贴着数据本身，不贴绘图区边缘
+        if let first = idx.first, let last = idx.last {
+            let fill = NSBezierPath()
+            fill.move(to: CGPoint(x: pos(first).x, y: plot.maxY))
+            for i in idx { fill.line(to: pos(i)) }
+            fill.line(to: CGPoint(x: pos(last).x, y: plot.maxY))
+            fill.close()
+            lineColor.withAlphaComponent(0.13).setFill()
+            fill.fill()
 
-        drawAxis(plot, lo: lo, hi: hi, zeroBased: useZeroBase, t0: t0, t1: t1)
+            let line = NSBezierPath()
+            line.lineWidth = 1.8
+            line.lineJoinStyle = .round
+            line.lineCapStyle = .round
+            for (n, i) in idx.enumerated() {
+                let p = pos(i)
+                if n == 0 { line.move(to: p) } else { line.line(to: p) }
+            }
+            lineColor.setStroke()
+            line.stroke()
+
+            // 末端点
+            let end = pos(last)
+            lineColor.setFill()
+            NSBezierPath(ovalIn: NSRect(x: end.x - 3, y: end.y - 3, width: 6, height: 6)).fill()
+        }
+
+        drawTimeAxis(plot, t0: t0, t1: t1)
     }
 
+    // MARK: - 坐标轴
+
+    /// 纵轴：左边缘竖线 + 刻度短横线 + 数值标签。
+    private func drawYAxis(_ plot: NSRect, lo: Double, hi: Double) {
+        let axisColor = NSColor.separatorColor.withAlphaComponent(0.8)
+        axisColor.setStroke()
+        let axis = NSBezierPath()
+        axis.lineWidth = 0.8
+        axis.move(to: CGPoint(x: plot.minX, y: plot.minY))
+        axis.line(to: CGPoint(x: plot.minX, y: plot.maxY))
+        axis.stroke()
+
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .regular),
+            .foregroundColor: NSColor.tertiaryLabelColor,
+        ]
+
+        for i in 0...Self.yTickCount {
+            let frac = Double(i) / Double(Self.yTickCount)
+            let v = lo + (hi - lo) * frac
+            let y = plot.maxY - plot.height * CGFloat(frac)
+
+            // 刻度短横线
+            let tick = NSBezierPath()
+            tick.lineWidth = 0.8
+            tick.move(to: CGPoint(x: plot.minX - 3, y: y))
+            tick.line(to: CGPoint(x: plot.minX, y: y))
+            tick.stroke()
+
+            // 标签右对齐贴着轴线
+            let s = Self.shortNumber(v) as NSString
+            let w = s.size(withAttributes: attrs).width
+            s.draw(at: CGPoint(x: plot.minX - 6 - w, y: y - 5), withAttributes: attrs)
+        }
+    }
+
+    /// 横轴：自下而上的水平网格线（与纵轴刻度对齐）。
     private func drawGrid(_ plot: NSRect) {
-        NSColor.separatorColor.withAlphaComponent(0.45).setStroke()
+        NSColor.separatorColor.withAlphaComponent(0.35).setStroke()
         let g = NSBezierPath()
         g.lineWidth = 0.5
-        for i in 0...3 {
-            let y = plot.minY + plot.height * CGFloat(i) / 3
+        for i in 0...Self.yTickCount {
+            let y = plot.minY + plot.height * CGFloat(i) / CGFloat(Self.yTickCount)
             g.move(to: CGPoint(x: plot.minX, y: y))
             g.line(to: CGPoint(x: plot.maxX, y: y))
         }
         g.stroke()
     }
 
-    private func drawAxis(_ plot: NSRect, lo: Double, hi: Double, zeroBased: Bool,
-                          t0: TimeInterval, t1: TimeInterval) {
+    /// 数据不足时也要有坐标轴，不然是个空框。
+    private func drawEmptyAxes(_ plot: NSRect) {
+        drawYAxis(plot, lo: 0, hi: 1)
+        drawGrid(plot)
+    }
+
+    /// 横轴时间刻度：3 小时窗口 → 每小时一格，共 4 个。
+    private func drawTimeAxis(_ plot: NSRect, t0: TimeInterval, t1: TimeInterval) {
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 9.5, weight: .regular),
             .foregroundColor: NSColor.tertiaryLabelColor,
         ]
-
-        // 纵轴：顶端与底端刻度
-        for (i, v) in [hi, lo].enumerated() {
-            let s = Self.shortNumber(v) as NSString
-            let y = plot.minY + (i == 0 ? -4 : plot.height - 4)
-            s.draw(at: CGPoint(x: 4, y: y), withAttributes: attrs)
-        }
-        if !zeroBased {
-            ("（已放大）" as NSString).draw(
-                at: CGPoint(x: 4, y: plot.minY + 9), withAttributes: attrs)
-        }
-
-        // ── 横轴：按「时辰」（2 小时）对齐的刻度，最多 4 个 ──
-        //
-        // 之前是把时间范围四等分再往上贴标签，位置虽然均匀，
-        // 但时间点是 09:37 这种零碎值，看着「刻度不均匀」；
-        // 数量一多标签还会互相压。
-        // 改成对齐到整点：先定步长（2h 起，超出 4 个就加 2h），
-        // 再从整点开始摆，标签用 HH:mm。
-        // 刻度：固定每「时辰」（2 小时）一格 —— 范围已经对齐到时辰边界，
-        // 所以这里必然落在整点上。
-        let step: TimeInterval = 2 * 3600
-
         let fmt = DateFormatter()
         fmt.dateFormat = "HH:mm"
 
-        var ticks: [TimeInterval] = []
-        var t = ceil(t0 / step) * step
-        while t <= t1 {
-            ticks.append(t)
-            t += step
-        }
-        // 跨度太小（一个整点都没落进来）时退回首尾两点
-        if ticks.count < 2 { ticks = [t0, t1] }
-
-        // 标签放不下就隔一个画一个，避免重叠
-        let sample = fmt.string(from: Date(timeIntervalSince1970: ticks[0])) as NSString
-        let labelW = sample.size(withAttributes: attrs).width
-        var minGap: CGFloat = labelW + 10
-        if ticks.count > 1 {
-            minGap = max(minGap, plot.width / CGFloat(ticks.count - 1))
-        }
-
-        var lastDrawnX: CGFloat = -.greatestFiniteMagnitude
-        for tick in ticks {
-            let frac = (tick - t0) / max(1, t1 - t0)
-            let s = fmt.string(from: Date(timeIntervalSince1970: tick)) as NSString
+        let step: TimeInterval = 3600
+        var t = t0
+        var lastRight: CGFloat = -.greatestFiniteMagnitude
+        while t <= t1 + 1 {
+            let frac = (t - t0) / max(1, t1 - t0)
+            let s = fmt.string(from: Date(timeIntervalSince1970: t)) as NSString
             let w = s.size(withAttributes: attrs).width
             var x = plot.minX + plot.width * CGFloat(frac) - w / 2
-            // 贴边不越界
             x = min(max(x, plot.minX), plot.maxX - w)
-            // 与上一个标签太近就跳过（首尾除外）
-            if x - lastDrawnX < labelW + 6, lastDrawnX > -.greatestFiniteMagnitude { continue }
+            // 太挤就跳过（首尾一定画）
+            if x < lastRight + 6, lastRight > -.greatestFiniteMagnitude {
+                t += step
+                continue
+            }
             s.draw(at: CGPoint(x: x, y: plot.maxY + 6), withAttributes: attrs)
-            lastDrawnX = x
+            lastRight = x + w
+            t += step
         }
     }
 

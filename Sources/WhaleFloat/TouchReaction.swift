@@ -45,6 +45,12 @@ final class TouchReaction {
         if !on { downSound?.stop(); upSound?.stop() }
     }
 
+    /// 重新读盘上的音效（用户导入新素材后调用）。
+    func reloadSounds() {
+        downSound = Self.loadSound("press-down")
+        upSound = Self.loadSound("press-up")
+    }
+
     // MARK: - 形变
 
     /// 按下：压扁 + 拉宽，底边不动。作用于内容容器（角色与文字一起）。

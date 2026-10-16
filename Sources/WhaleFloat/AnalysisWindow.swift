@@ -10,7 +10,7 @@ import Foundation
 ///   服务可用性指示灯
 @MainActor
 final class AnalysisWindowController: NSObject {
-    private var panel: NSPanel?
+    private var panel: NSWindow?
     private let chart = SparkChartView()
     private let chartCaption = NSTextField(labelWithString: "")
     private let summaryLabel = NSTextField(labelWithString: "")
@@ -51,25 +51,30 @@ final class AnalysisWindowController: NSObject {
         let height = Self.contentHeight
         let content = buildContent(height: height)
 
-        // 菜单形态：无标题栏、圆角、带阴影。
-        // 用 .borderless 而不是 .titled —— 后者会带一条标题栏，跟右键菜单不是一回事。
-        let p = NSPanel(
+        // 标准标题栏窗口（带红绿灯）。
+        // 之前是 .borderless 的「菜单形态」，但图表本来就放不进 NSMenu，
+        // 既然要独立成窗，就按普通窗口来 —— 能拖、能缩放、能最小化。
+        let p = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: Self.panelWidth, height: height),
-            styleMask: [.borderless, .nonactivatingPanel],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered, defer: false
         )
-        p.isMovableByWindowBackground = true
-        p.level = .floating
-        p.hasShadow = true
-        p.backgroundColor = .clear
-        p.isOpaque = false
+        p.title = "用量"
+        // 标题栏与内容区都要正常底色。
+        // 之前这里留着 .borderless 形态的设置（backgroundColor = .clear、
+        // isOpaque = false），换成标准窗口后就成了「标题栏透明」——
+        // 那两条是为无边框窗口准备的，标准窗口不该有。
         p.isReleasedWhenClosed = false
+        p.isMovableByWindowBackground = false   // 有自己的标题栏可以拖
+        // 让它浮在普通窗口之上，但不抢键盘焦点以外的东西
+        p.level = .floating
         p.contentView = content
         panel = p
         refresh()
 
-        // 贴着鲸鱼浮窗弹出，而不是屏幕中央 —— 菜单的观感
-        positionNearFloatWindow(p)
+        // 标准窗口：居中显示，之后可以自由拖动与缩放。
+        // （之前是「贴着浮窗弹出」，那是菜单形态的定位方式。）
+        p.center()
         p.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -134,16 +139,6 @@ final class AnalysisWindowController: NSObject {
     }
 
     /// 尽量贴着鲸鱼浮窗出现。
-    private func positionNearFloatWindow(_ panel: NSPanel) {
-        let whale = NSApp.windows.first { $0 is FloatWindow }
-        guard let w = whale else { panel.center(); return }
-        let s = w.frame
-        var x = s.minX - panel.frame.width - 8
-        if x < 40 { x = s.maxX + 8 }
-        var y = s.maxY - panel.frame.height
-        if y < 40 { y = 40 }
-        panel.setFrameOrigin(NSPoint(x: x, y: y))
-    }
 
     // MARK: - 刷新
 

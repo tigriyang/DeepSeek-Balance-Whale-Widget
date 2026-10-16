@@ -239,6 +239,11 @@ final class WhaleView: NSView {
         touch = TouchReaction(host: self)
     }
 
+    /// 重新加载音效（用户导入后调用）。
+    func reloadSounds() {
+        touch?.reloadSounds()
+    }
+
     /// 触发一次摸摸头（形变 + 音效）—— 供外部调用（如双击）。
     func poke() {
         touch?.pressDown()

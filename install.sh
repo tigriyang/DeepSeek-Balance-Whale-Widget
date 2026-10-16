@@ -15,7 +15,7 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="WhaleFloat"
-APP="$HOME/Applications/${APP_NAME}.app"
+APP="/Applications/${APP_NAME}.app"
 PLIST_SRC="$HERE/ai.dsh.whalefloat.plist"
 PLIST_DST="$HOME/Library/LaunchAgents/ai.dsh.whalefloat.plist"
 LABEL="ai.dsh.whalefloat"
@@ -53,9 +53,7 @@ bash "$HERE/build-app.sh" || { say "✗ 打包失败"; exit 1; }
 say "▸ 注册开机自启（仅崩溃时自动拉起）…"
 if [ -f "$PLIST_SRC" ]; then
   launchctl unload "$PLIST_DST" 2>/dev/null
-  # plist 里的 __HOME__ 是占位符 —— launchd 不做变量展开，
-  # 所以安装时替换成实际路径
-  sed "s|__HOME__|$HOME|g" "$PLIST_SRC" > "$PLIST_DST"
+  cp "$PLIST_SRC" "$PLIST_DST"
   launchctl load -w "$PLIST_DST" 2>/dev/null
   say "  已注册：$LABEL"
 else
