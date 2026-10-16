@@ -1,0 +1,23 @@
+# 构建产物
+.build/
+*.o
+*.swiftmodule
+
+# macOS
+.DS_Store
+
+# ── 角色素材与音效（第三方）─────────────────────────────
+# 这些来自网页版鲸鱼插件 dsh-whale-widget 的随包资源，
+# 版权不属于本仓库，因此不入库。使用者请自备：
+#   Resources/role-clean.png     纯角色立绘（透明背景）
+#   Resources/DSniang1.png       备选角色
+#   Resources/press-down.mp3     按下音
+#   Resources/press-up.mp3       松开音
+#   Resources/AppIcon.icns       应用图标（可由立绘合成）
+Resources/*.png
+Resources/*.mp3
+Resources/*.icns
+
+# 本地配置与账本（含个人数据）
+whalefloat.json
+*.log

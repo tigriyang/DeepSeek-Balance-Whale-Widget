@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ai.dsh.whalefloat</string>
+
+    <!-- 直接启动 app bundle 内的可执行文件。
+         不用 open -a 是为了让 launchd 直接持有进程句柄，
+         崩溃后 KeepAlive 才能可靠拉起。 -->
+    <key>ProgramArguments</key>
+    <array>
+        <!-- __HOME__ 由 install.sh 在安装时替换成实际的家目录 -->
+        <string>__HOME__/Applications/WhaleFloat.app/Contents/MacOS/WhaleFloat</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <!-- 只在本程序**异常退出**（崩溃）时自动拉起；正常退出（菜单「退出」或 Cmd+Q）
+         不再自启。
+         之前这里写的是 <true/>，含义是「无论如何都保持运行」—— 于是退出后
+         过一会儿又被 launchd 拉回来，看起来就像「起停没做好、自己又起来了」。 -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <!-- GUI 程序必须在用户图形会话里跑 -->
+    <key>LimitLoadToSessionType</key>
+    <string>Aqua</string>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/whalefloat.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/whalefloat.log</string>
+</dict>
+</plist>
