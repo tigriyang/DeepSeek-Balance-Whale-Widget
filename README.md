@@ -38,14 +38,17 @@
 
 ### 3. 插件安装
 
-随包携带两个 DSH 侧的中介插件，首次运行时**弹出提示询问是否安装**：
+随包携带**三个** DSH 侧的中介插件，首次运行时**静默装好**（不弹框）：
 
 | 插件 | 作用 |
 |---|---|
 | `dsh-wait-state` | DSH 等你回答 / 授权时，浮窗冒泡提醒 |
 | `dsh-turn-usage` | 采集每轮消耗，供浮窗显示金额 |
+| `dsh-notify-bridge` | 把回复推到系统通知，并支持在通知里直接回复 |
 
-安装即注册进 DSH 的 profile，不需要你手动改配置。
+装好后自动注册进 DSH 的 web profile，不需要你手动改配置。
+
+**菜单里还有一条「安装配套插件…」** —— 那是给手动补装用的，会弹框告诉你结果。
 
 ### 4. 余额与消耗监控
 
@@ -110,7 +113,7 @@ open -a WhaleFloat
 4. 卸载镜像并清理：hdiutil detach <挂载点>; rm -f /tmp/WhaleFloat.dmg
 
 5. 启动它：open -a WhaleFloat
-   （首次运行它会自己安装 launchd 自启配置，并弹出插件安装询问）
+   （首次运行它会自己安装 launchd 自启配置，并静默装好三个配套插件）
 
 6. 验证：
    · ps -axo command= | grep WhaleFloat  → 应有进程
@@ -144,11 +147,12 @@ WhaleFloat.app                Swift + AppKit 原生程序
 └── docs/images 界面截图
 
 外部：
-├── dsh-wait-state    DSH 插件：上报「等回答 / 等授权」状态
-└── dsh-turn-usage    DSH 插件：采集每轮 token 与金额
+├── dsh-wait-state     DSH 插件：上报「等回答 / 等授权」状态
+├── dsh-turn-usage     DSH 插件：采集每轮 token 与金额
+└── dsh-notify-bridge  DSH 插件：把回复推到系统通知，并接收通知里的回复
 ```
 
-**为什么需要那两个插件**：DSH 的事件只有它自己知道，
+**为什么需要那三个插件**：DSH 的事件只有它自己知道，
 插件在 DSH 进程内监听后写成文件，本程序读文件 —— 两边解耦，
 DSH 没开时程序照常工作（只是少了实时数据）。
 

@@ -16,7 +16,7 @@ enum MenuBuilder {
         let m = NSMenu()
         m.autoenablesItems = false
 
-        add(m, "安装配套插件", #selector(AppDelegate.installPlugins), target)
+        add(m, "安装配套插件", #selector(AppDelegate.installPlugins), target, key: "1")
 
         // ── 桌宠设置 ──
         let pet = NSMenu()
@@ -52,13 +52,13 @@ enum MenuBuilder {
             checked: target.settings.snapEnabled)
         m.addItem(submenu("高级设置", adv))
 
-        add(m, "分析…", #selector(AppDelegate.openLedger), target)
+        add(m, "分析…", #selector(AppDelegate.openLedger), target, key: "2")
         m.addItem(.separator())
-        add(m, "启动 DSH GUI", #selector(AppDelegate.launchDSH), target)
-        add(m, "充值 / 查看用量…", #selector(AppDelegate.openBilling), target)
+        add(m, "启动 DSH GUI", #selector(AppDelegate.launchDSH), target, key: "3")
+        add(m, "充值 / 查看用量…", #selector(AppDelegate.openBilling), target, key: "4")
         m.addItem(.separator())
-        add(m, "退出浮窗", #selector(AppDelegate.quit), target)
-        add(m, "退出 DSH", #selector(AppDelegate.quitEverything), target)
+        add(m, "退出浮窗", #selector(AppDelegate.quit), target, key: "5")
+        add(m, "退出 DSH", #selector(AppDelegate.quitEverything), target, key: "6")
         m.addItem(.separator())
         // 卸载入口：清自启 + 摘插件 + 本体进废纸篓。
         // 拖进废纸篓也能删掉本体，但 launchd 配置和 DSH 插件会留下。
@@ -74,11 +74,19 @@ enum MenuBuilder {
     }
 
     private static func add(_ m: NSMenu, _ title: String, _ sel: Selector,
-                            _ target: AnyObject, checked: Bool = false) {
-        let item = NSMenuItem(title: title, action: sel, keyEquivalent: "")
+                            _ target: AnyObject, checked: Bool = false,
+                            key: String? = nil) {
+        let item = NSMenuItem(title: title, action: sel, keyEquivalent: key ?? "")
         item.target = target
         // 勾选状态用系统的那一套，而不是自己在标题里拼「✓」
         item.state = checked ? .on : .off
+        if key != nil {
+            // 菜单展开时按 ⌥1…⌥8 可直接触发。
+            // 注意这不同于之前的全局快捷键：那时菜单没开也生效，
+            // 但靠的是全局键盘监听（需要辅助功能权限）。现在只读权限，
+            // 所以退回到菜单内有效。
+            item.keyEquivalentModifierMask = [.option]
+        }
         m.addItem(item)
     }
 }
@@ -103,7 +111,7 @@ enum AppInfo {
         return String(format: "%@%.2f", symbol, v)
     }
 
-    static let version = "0.1.4"
+    static let version = "0.1.5"
 }
 
 /// 外部链接。
@@ -251,6 +259,22 @@ enum ProcessManager {
 /// 自己拼 URL —— 必须走启动器。
 @MainActor
 enum DSHLauncher {
+    /// DSH 是否在跑：看 3080 端口有没有监听。
+    ///
+    /// 不打扰服务、也不需要凭据。这个方法原先在 App 和 AnalysisWindow 里
+    /// 各写了一份完全一样的，合并到这里。
+    static var isRunning: Bool {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        p.arguments = ["-nP", "-iTCP:3080", "-sTCP:LISTEN"]
+        p.standardOutput = Pipe()
+        p.standardError = FileHandle.nullDevice
+        p.standardInput = FileHandle.nullDevice
+        do { try p.run() } catch { return false }
+        p.waitUntilExit()
+        return p.terminationStatus == 0
+    }
+
     /// 启动器脚本的位置，按优先级查找。
     ///
     /// 包内那份首选 —— 原实现写死了 ~/dsh-workspace/.dsh/skills/...，
