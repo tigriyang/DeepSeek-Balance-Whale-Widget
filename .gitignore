@@ -1,5 +1,6 @@
 # 构建产物
 .build/
+dist/            # DMG 等打包产物，走 GitHub Releases 而不是入库
 *.o
 *.swiftmodule
 
