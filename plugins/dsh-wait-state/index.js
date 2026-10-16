@@ -58,8 +58,17 @@ function apply(ctx) {
 	sctx.on("session/event", (session, event) => {
 		try {
 			const type = String(event?.type ?? "");
-			// 临时调试：记录收到的事件类型
-			try { fs.appendFileSync("/tmp/wait-events.log", type + "\n"); } catch {}
+			// 诊断日志：只在有需要时打开（写 /tmp/wait-events.log）。
+			// 记类型，工具类事件额外记工具名 —— 排查「为什么等待泡没出现」时，
+			// 光看事件类型不够，得知道具体调的是哪个工具。
+			if (process.env.WHALEFLOAT_DEBUG === "1") {
+				try {
+					const extra = type === "tool/call"
+						? " " + String(event?.data?.name ?? event?.data?.toolName ?? "?")
+						: "";
+					fs.appendFileSync("/tmp/wait-events.log", type + extra + "\n");
+				} catch { /* 忽略 */ }
+			}
 			const data = event?.data ?? {};
 			const now = Date.now();
 
