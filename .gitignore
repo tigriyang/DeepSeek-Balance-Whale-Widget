@@ -7,11 +7,21 @@ dist/            # DMG 等打包产物，走 GitHub Releases 而不是入库
 # macOS
 .DS_Store
 
-# ── 角色素材与音效 ──────────────────────────────────────
+# ── 角色素材与音效（**不入库**）────────────────────────
 # 来源：DeepSeek-Balance-Whale-Widget（MeteorNOX）
 #   https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget
-# 原项目授权允许再分发，此处随包附带并保留出处。
-# 若原作者有异议，请提 issue，我会立即移除。
+#
+# 该项目的 PROVENANCE.md 明确划分：
+#   代码         MIT
+#   assets/      不在 MIT 覆盖范围内
+#                "按 as-is 随插件分发，仅用于运行本插件；
+#                 不授予再许可，也不声明为原创作品"
+#
+# 「不授予再许可」意味着不能把它搬进别的项目再分发，
+# 所以这里排除，使用者请自备。
+Resources/*.png
+Resources/*.mp3
+Resources/*.icns
 
 # 本地配置与账本（含个人数据）
 whalefloat.json
