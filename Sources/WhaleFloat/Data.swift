@@ -161,6 +161,8 @@ struct BalanceSnapshot {
     var toppedUp: Double
     var currency: String
     var fetchedAt: Date
+    /// 接口给的「账户是否可用」。欠费或停用时为 false。
+    var isAvailable: Bool = true
 
     var symbol: String { currency == "USD" ? "$" : "¥" }
     var totalText: String { AppInfo.money(total, symbol: symbol) }
@@ -231,12 +233,16 @@ actor BalanceClient {
               let first = decoded.balanceInfos.first else {
             throw Failure.badPayload
         }
+        // 接口把金额给成字符串。转换失败时**不能退化成 0** ——
+        // 那会让「解析出错」看起来像「余额刚好为零」，用户会被误导。
+        guard let total = Double(first.totalBalance) else { throw Failure.badPayload }
         return BalanceSnapshot(
-            total: Double(first.totalBalance) ?? 0,
+            total: total,
             granted: Double(first.grantedBalance) ?? 0,
             toppedUp: Double(first.toppedUpBalance) ?? 0,
             currency: first.currency,
-            fetchedAt: Date()
+            fetchedAt: Date(),
+            isAvailable: decoded.isAvailable
         )
     }
 }

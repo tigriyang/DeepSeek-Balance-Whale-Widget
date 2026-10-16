@@ -111,7 +111,7 @@ enum AppInfo {
         return String(format: "%@%.2f", symbol, v)
     }
 
-    static let version = "0.1.5"
+    static let version = "0.1.6"
 }
 
 /// 外部链接。

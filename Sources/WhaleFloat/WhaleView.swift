@@ -582,6 +582,15 @@ final class WhaleView: NSView {
         amountLabel.textColor = BubbleStyle.ink
         if let s = snapshot {
             amountLabel.stringValue = AppInfo.money(s.total, symbol: s.symbol)
+            // 账户被停用时余额本身可能还显示得出来，但那没意义 ——
+            // 明确说清楚，免得用户以为只是数字难看。
+            if !s.isAvailable {
+                titleLabel.stringValue = "账户不可用"
+                usedLabel.stringValue = "余额已停用，请检查账户状态"
+                setValleyBadge(peak: nil)
+                autofitLabels()
+                return
+            }
         } else {
             amountLabel.stringValue = "—"
         }
