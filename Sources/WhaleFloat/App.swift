@@ -38,10 +38,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 对话输出 → 系统通知（带回复框）。首次会弹一次系统授权对话框。
         NotifyBridge.shared.start()
 
+        // 从 DMG 拖进「应用程序」的首次运行：自己把 launchd 自启装好。
+        // 这样安装只需一步（拖拽），不用再跑 install.sh。
+        installLaunchAgentIfNeeded()
+
         // 首次运行引导：缺「中介」插件时提示安装。
         // 延后一拍，等浮窗先显示出来 —— 否则弹窗会盖在还没画完的界面上。
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             PluginInstaller.promptIfNeeded()
+        }
+    }
+
+    /// 首次运行时安装 launchd 自启。
+    ///
+    /// plist 模板随包（Resources/launchagent.plist），里面的 __HOME__ 在这里
+    /// 替换成实际路径 —— launchd 不做变量展开，只能安装时定死。
+    private func installLaunchAgentIfNeeded() {
+        let fm = FileManager.default
+        let label = "ai.dsh.whalefloat"
+        let dst = fm.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents/\(label).plist")
+        // 已经装过就不动（避免覆盖用户改过的配置）
+        guard !fm.fileExists(atPath: dst.path) else { return }
+        guard let tpl = Bundle.main.url(forResource: "launchagent", withExtension: "plist"),
+              let raw = try? String(contentsOf: tpl, encoding: .utf8) else { return }
+        let home = fm.homeDirectoryForCurrentUser.path
+        let content = raw.replacingOccurrences(of: "__HOME__", with: home)
+        do {
+            try fm.createDirectory(at: dst.deletingLastPathComponent(),
+                                   withIntermediateDirectories: true)
+            try content.write(to: dst, atomically: true, encoding: .utf8)
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+            p.arguments = ["load", "-w", dst.path]
+            try? p.run()
+            NSLog("WhaleFloat: 已安装 launchd 自启")
+        } catch {
+            NSLog("WhaleFloat: 自启安装失败 \(error.localizedDescription)")
         }
     }
 

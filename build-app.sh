@@ -38,6 +38,10 @@ for ext in png gif mp3 wav icns; do
   done
 done
 
+# 内置 launchd 模板 —— 首次运行时程序自己装自启，
+# 这样从 DMG 拖进「应用程序」就能用，不需要再跑 install.sh。
+cp "$HERE/ai.dsh.whalefloat.plist" "$DEST/Contents/Resources/launchagent.plist"
+
 # 内置 DSH 启动器 —— 「启动 DSH GUI」菜单要用。
 # 原先写死的是 ~/dsh-workspace/... 下的路径，换台机器必然找不到；
 # 随包带一份，运行时优先用包内的。
@@ -76,8 +80,8 @@ cat > "$DEST/Contents/Info.plist" <<PLIST
     <!-- 必须 >= 26：系统按「链接 SDK 版本」决定是否启用 Liquid Glass。
          写 13.0 时实测 NSPopover 给的是纯白底，不是系统材质。 -->
     <key>LSMinimumSystemVersion</key><string>26.0</string>
-    <!-- 菜单栏/浮窗程序：不进 Dock -->
-    <key>LSUIElement</key><true/>
+    <!-- 进 Dock，有图标（可在 Dock 上右键退出/切换） -->
+    <key>LSUIElement</key><false/>
     <key>NSHighResolutionCapable</key><true/>
     <key>CFBundleIconFile</key><string>AppIcon</string>
 </dict>
