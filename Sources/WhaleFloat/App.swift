@@ -341,21 +341,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 设置页里每一行的统一高度 —— 行高一致，间距才看起来均匀。
     private static let rowHeight: CGFloat = 20
 
-    /// 行与行之间的统一间距。
-    /// 每行只设 bottom（top 一律 0），这样间距只有一个来源，不会两处相加出误差。
+    /// 行与行之间的**唯一**间距来源。
+    ///
+    /// 规则：每行 top 一律 0、bottom 一律 rowGap、高度一律 rowHeight。
+    /// 整页只有这三个数在起作用 —— 不再为「标签紧贴控件」单开一种间距，
+    /// 那种小聪明会让页面上出现两种节奏，怎么调都显得不齐。
     private static let rowGap: CGFloat = 8
-
-    /// 标签与它下方控件的间距（比 rowGap 小，让两者成组）。
-    private static let labelGap: CGFloat = 3
 
     private static func settingsNote(_ text: String, width: CGFloat) -> NSView {
         let l = NSTextField(labelWithString: text)
         l.font = .systemFont(ofSize: MenuPanelController.subFontSize)
         l.textColor = .secondaryLabelColor
         let row = NSStackView(views: [l])
-        // 规则：所有行的 top 一律为 0，间距只由上一行的 bottom 决定。
-        // 组标签紧贴它的控件（bottom 2）。
-        row.edgeInsets = NSEdgeInsets(top: 0, left: 14, bottom: Self.labelGap, right: 14)
+        // 与其它行**完全同构**：同样的高度、同样的间距。
+        // 之前这行既没有高度约束、bottom 又与别行不同（3 vs 8），
+        // 于是高度和间距各有两个来源，怎么调都对不齐。
+        row.heightAnchor.constraint(equalToConstant: Self.rowHeight).isActive = true
+        row.edgeInsets = NSEdgeInsets(top: 0, left: 14, bottom: Self.rowGap, right: 14)
         row.translatesAutoresizingMaskIntoConstraints = false
         row.widthAnchor.constraint(equalToConstant: width).isActive = true
         return row
