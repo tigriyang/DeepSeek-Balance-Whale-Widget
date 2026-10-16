@@ -20,7 +20,10 @@ enum MenuBuilder {
 
         // ── 桌宠设置 ──
         let pet = NSMenu()
-        add(pet, "开启 / 关闭桌宠", #selector(AppDelegate.toggleFloat), target)
+        // 用勾选显示当前是开还是关 —— 不然只看到一句「开启/关闭」，
+        // 不知道点下去会发生什么。
+        add(pet, "显示桌宠", #selector(AppDelegate.toggleFloat), target,
+            checked: target.floatWindow?.isVisible ?? false)
         pet.addItem(.separator())
         add(pet, "导入图片素材…", #selector(AppDelegate.importCharacter), target)
         add(pet, "导入音效素材…", #selector(AppDelegate.importSound), target)
@@ -84,7 +87,23 @@ enum AppInfo {
     /// 次要文字的字号（菜单、面板里的说明与数值统一用它）。
     static let subFontSize: CGFloat = 12
 
-    static let version = "0.1.3"
+    /// 金额格式化。
+    ///
+    /// 小额保留两位小数；上万后用「万」「亿」——
+    /// 否则余额一大，气泡和分析窗口里就会挤出一长串数字。
+    /// （上游 issue #245 报过同类问题。）
+    static func money(_ v: Double, symbol: String = "¥") -> String {
+        let a = abs(v)
+        if a >= 100_000_000 {
+            return String(format: "%@%.2f亿", symbol, v / 100_000_000)
+        }
+        if a >= 10_000 {
+            return String(format: "%@%.2f万", symbol, v / 10_000)
+        }
+        return String(format: "%@%.2f", symbol, v)
+    }
+
+    static let version = "0.1.4"
 }
 
 /// 外部链接。

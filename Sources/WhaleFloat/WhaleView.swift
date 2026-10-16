@@ -581,12 +581,12 @@ final class WhaleView: NSView {
             ofSize: BubbleStyle.amountSize, weight: .heavy)
         amountLabel.textColor = BubbleStyle.ink
         if let s = snapshot {
-            amountLabel.stringValue = String(format: "%@ %.2f", s.symbol, s.total)
+            amountLabel.stringValue = AppInfo.money(s.total, symbol: s.symbol)
         } else {
             amountLabel.stringValue = "—"
         }
         if let used = usedToday {
-            usedLabel.stringValue = String(format: "今日已用 %@%.2f", snapshot?.symbol ?? "¥", used)
+            usedLabel.stringValue = "今日已用 " + AppInfo.money(used, symbol: snapshot?.symbol ?? "¥")
         } else {
             usedLabel.stringValue = " "
         }

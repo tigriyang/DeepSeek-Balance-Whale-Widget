@@ -1,42 +1,32 @@
 import AppKit
 import Foundation
 
-/// 分析面板 —— 做成**菜单那种小而紧凑的形态**，而不是独立大窗口。
+/// 用量窗口：汇总 + 消耗折线图 + 三个状态灯。
 ///
-/// 尺寸与观感向右键菜单看齐：宽度固定、无标题栏、内容一屏排完。
-/// 结构：
-///   余额 / 今日已用 / 轮数   一行
-///   token 消耗折线图
-///   服务可用性指示灯
+/// 图表放不进 NSMenu（那里面只能放菜单项），所以它是个独立窗口。
+/// 既然是独立窗口就按标准窗口来：有标题栏与红绿灯，能拖能缩放。
+///
+/// 布局用 Auto Layout 而不是手算 frame —— 手算在窗口缩放后必然错位。
 @MainActor
 final class AnalysisWindowController: NSObject {
     private var panel: NSWindow?
-    private let chart = SparkChartView()
-    private let chartCaption = NSTextField(labelWithString: "")
+
     private let summaryLabel = NSTextField(labelWithString: "")
-    private let statusDot = NSView()
-    private let statusLabel = NSTextField(labelWithString: "")
-    private let statusDetail = NSTextField(labelWithString: "")
+    private let chartCaption = NSTextField(labelWithString: "")
+    private let chart = SparkChartView()
+    private let restartButton = NSButton()
+
+    /// 三个状态灯：服务（DSH 在不在）、接口（余额接口通不通）、账本（有没有数据）
+    private let svc = StatusChip(title: "服务")
+    private let api = StatusChip(title: "接口")
+    private let led = StatusChip(title: "账本")
 
     var lastBalanceOK: Bool?
     var lastBalanceError: String?
+    var onRestartDSH: (() -> Void)?
 
-    /// 与右键菜单同宽的紧凑面板。
-    private static let panelWidth: CGFloat = 300
-    private static let chartHeight: CGFloat = 108
-    private static let pad: CGFloat = 12
-
-    /// 内容总高。frame 布局必须自己累加，不能靠 fittingSize。
-    private static var contentHeight: CGFloat {
-        pad                      // 上边距
-            + 18                 // 汇总行
-            + 6
-            + 14                 // 图表标题
-            + chartHeight        // 折线图
-            + 6
-            + 30                 // 可用性两行
-            + pad                // 下边距
-    }
+    private static let minWidth: CGFloat = 320
+    private static let minHeight: CGFloat = 250
 
     func show() {
         if let p = panel {
@@ -45,145 +35,114 @@ final class AnalysisWindowController: NSObject {
             NSApp.activate(ignoringOtherApps: true)
             return
         }
-
-        // 高度**必须手算** —— 这里是 frame 布局，fittingSize 依赖 Auto Layout，
-        // 对纯 frame 布局的视图会返回 0，结果就是面板高度为 0、内容全被裁掉。
-        let height = Self.contentHeight
-        let content = buildContent(height: height)
-
-        // 标准标题栏窗口（带红绿灯）。
-        // 之前是 .borderless 的「菜单形态」，但图表本来就放不进 NSMenu，
-        // 既然要独立成窗，就按普通窗口来 —— 能拖、能缩放、能最小化。
         let p = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: Self.panelWidth, height: height),
+            contentRect: NSRect(x: 0, y: 0, width: Self.minWidth, height: Self.minHeight),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered, defer: false
         )
         p.title = "用量"
-        // 标题栏与内容区都要正常底色。
-        // 之前这里留着 .borderless 形态的设置（backgroundColor = .clear、
-        // isOpaque = false），换成标准窗口后就成了「标题栏透明」——
-        // 那两条是为无边框窗口准备的，标准窗口不该有。
         p.isReleasedWhenClosed = false
-        p.isMovableByWindowBackground = false   // 有自己的标题栏可以拖
-        // 让它浮在普通窗口之上，但不抢键盘焦点以外的东西
-        p.level = .floating
-        p.contentView = content
+        p.contentView = buildContent()
+        p.minSize = NSSize(width: Self.minWidth, height: Self.minHeight)
         panel = p
         refresh()
-
-        // 标准窗口：居中显示，之后可以自由拖动与缩放。
-        // （之前是「贴着浮窗弹出」，那是菜单形态的定位方式。）
         p.center()
         p.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    // MARK: - 内容
+    // MARK: - 界面
 
-    private func buildContent(height: CGFloat) -> NSView {
-        // 用一个普通容器承载，避免 NSStackView 直接当 contentView 时约束悬空
-        let root = NSView(frame: NSRect(x: 0, y: 0, width: Self.panelWidth, height: height))
+    private func buildContent() -> NSView {
+        let root = NSView()
         root.translatesAutoresizingMaskIntoConstraints = false
-        root.wantsLayer = true
-        // 菜单观感：圆角 + 半透明材质底
-        root.layer?.cornerRadius = 10
-        root.layer?.masksToBounds = true
-        if let mat = NSVisualEffectView(frame: root.bounds) as NSVisualEffectView? {
-            mat.material = .menu
-            mat.blendingMode = .behindWindow
-            mat.state = .active
-            mat.autoresizingMask = [.width, .height]
-            root.addSubview(mat)
-        }
-
-        let pad = Self.pad
-        var y = pad
-
-        func add(_ v: NSView, height h: CGFloat) {
-            v.frame = NSRect(x: pad, y: y, width: Self.panelWidth - pad * 2, height: h)
-            v.autoresizingMask = [.width]
-            root.addSubview(v)
-            y += h
-        }
 
         summaryLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
         summaryLabel.textColor = .labelColor
-        add(summaryLabel, height: 18)
-        y += 6
 
-        chartCaption.font = .systemFont(ofSize: 10, weight: .regular)
+        chartCaption.font = .systemFont(ofSize: 10)
         chartCaption.textColor = .tertiaryLabelColor
-        add(chartCaption, height: 14)
-        add(chart, height: Self.chartHeight)
-        y += 6
 
-        // 可用性：圆点 + 两行文字
-        statusDot.wantsLayer = true
-        statusDot.layer?.cornerRadius = 4
-        statusDot.frame = NSRect(x: pad, y: y + 2, width: 8, height: 8)
-        root.addSubview(statusDot)
+        restartButton.title = "重启服务"
+        restartButton.bezelStyle = .rounded
+        restartButton.controlSize = .small
+        restartButton.target = self
+        restartButton.action = #selector(restartTapped)
+        restartButton.setContentHuggingPriority(.required, for: .horizontal)
 
-        statusLabel.font = .systemFont(ofSize: 11.5, weight: .semibold)
-        statusLabel.frame = NSRect(x: pad + 14, y: y - 2, width: Self.panelWidth - pad * 2 - 14, height: 15)
-        root.addSubview(statusLabel)
+        // 状态行：三个灯在左，重启按钮在右
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
-        statusDetail.font = .systemFont(ofSize: 10)
-        statusDetail.textColor = .secondaryLabelColor
-        statusDetail.frame = NSRect(x: pad + 14, y: y + 13, width: Self.panelWidth - pad * 2 - 14, height: 14)
-        root.addSubview(statusDetail)
+        let statusRow = NSStackView(views: [svc, api, led, spacer, restartButton])
+        statusRow.orientation = .horizontal
+        statusRow.alignment = .centerY
+        statusRow.spacing = 10
+        // 灯的内容不能被压缩，空间不够时让按钮先挤
+        for chip in [svc, api, led] {
+            chip.setContentCompressionResistancePriority(.required, for: .horizontal)
+        }
 
-        y += 30 + pad
-        root.frame = NSRect(x: 0, y: 0, width: Self.panelWidth, height: y)
+        let stack = NSStackView(views: [summaryLabel, chartCaption, chart, statusRow])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.setCustomSpacing(10, after: chart)
+
+        root.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 14),
+            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 14),
+            stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -14),
+            stack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -14),
+
+            chart.heightAnchor.constraint(equalToConstant: 130),
+            chart.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            statusRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+        ])
         return root
     }
 
-    /// 尽量贴着鲸鱼浮窗出现。
+    @objc private func restartTapped() {
+        onRestartDSH?()
+    }
 
     // MARK: - 刷新
 
     func refresh() {
-        let led = TurnLedger.load()
-        let events = (led?.events ?? []).sorted { $0.ts < $1.ts }
+        let ledger = TurnLedger.load()
+        let events = (ledger?.events ?? []).sorted { $0.ts < $1.ts }
 
-        // 汇总：挤成一行
         var parts: [String] = []
-        if let bal = led?.lastBalance { parts.append(String(format: "余额 ¥%.2f", bal)) }
-        if let used = led?.todayUsage { parts.append(String(format: "今日 ¥%.2f", used)) }
+        if let bal = ledger?.lastBalance { parts.append("余额 " + AppInfo.money(bal)) }
+        if let used = ledger?.todayUsage { parts.append("今日 " + AppInfo.money(used)) }
         parts.append("\(events.count) 轮")
         summaryLabel.stringValue = parts.joined(separator: "   ")
 
-        // 折线：最近 40 轮
+        // 折线：最近 40 轮（X 轴会再按 3 小时窗口裁一次）
         let recent = events.suffix(40)
         chart.points = recent.map {
             SparkChartView.Point(date: $0.date, value: Double($0.tokens))
         }
         if recent.count >= 2 {
             let total = recent.reduce(0) { $0 + $1.tokens }
-            chartCaption.stringValue = "最近 \(recent.count) 轮消耗（合计 \(WhaleView.formatTokens(total))）"
+            chartCaption.stringValue = "最近 \(recent.count) 轮（合计 \(WhaleView.formatTokens(total))）"
         } else {
             chartCaption.stringValue = "最近轮次消耗"
         }
 
-        updateStatus()
-    }
-
-    private func updateStatus() {
+        // 三个灯各自独立：出问题时一眼看出卡在哪一环。
         let dshUp = Self.isDSHRunning()
+        svc.set(ok: dshUp, detail: dshUp ? "DSH 在跑" : "DSH 没起来")
+
         let apiOK = lastBalanceOK ?? false
-        let allGood = dshUp && apiOK
+        api.set(ok: apiOK,
+                detail: apiOK ? "余额接口正常" : (lastBalanceError ?? "余额接口不可达"))
 
-        statusDot.layer?.backgroundColor = (allGood ? NSColor.systemGreen : NSColor.systemRed).cgColor
-        statusLabel.stringValue = allGood ? "服务正常" : "服务异常"
-        statusLabel.textColor = allGood ? .systemGreen : .systemRed
-
-        var parts: [String] = [dshUp ? "DSH 运行中" : "DSH 未运行"]
-        if apiOK {
-            parts.append("余额接口可达")
-        } else {
-            parts.append("余额接口不可用")
-        }
-        statusDetail.stringValue = parts.joined(separator: " · ")
+        let hasLedger = !events.isEmpty
+        led.set(ok: hasLedger,
+                detail: hasLedger ? "\(events.count) 条记录" : "还没有记录")
     }
 
     private static func isDSHRunning() -> Bool {
@@ -196,5 +155,39 @@ final class AnalysisWindowController: NSObject {
         do { try p.run() } catch { return false }
         p.waitUntilExit()
         return p.terminationStatus == 0
+    }
+}
+
+/// 一个状态灯：圆点 + 名称。悬停能看到细节。
+@MainActor
+final class StatusChip: NSStackView {
+    private let dot = NSView()
+    private let label = NSTextField(labelWithString: "")
+
+    init(title: String) {
+        super.init(frame: .zero)
+        orientation = .horizontal
+        alignment = .centerY
+        spacing = 4
+
+        dot.wantsLayer = true
+        dot.translatesAutoresizingMaskIntoConstraints = false
+        dot.layer?.cornerRadius = 3.5
+        dot.widthAnchor.constraint(equalToConstant: 7).isActive = true
+        dot.heightAnchor.constraint(equalToConstant: 7).isActive = true
+
+        label.stringValue = title
+        label.font = .systemFont(ofSize: 11)
+        label.textColor = .secondaryLabelColor
+
+        addArrangedSubview(dot)
+        addArrangedSubview(label)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    func set(ok: Bool, detail: String) {
+        dot.layer?.backgroundColor = (ok ? NSColor.systemGreen : NSColor.systemRed).cgColor
+        toolTip = detail
     }
 }

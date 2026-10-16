@@ -163,7 +163,7 @@ struct BalanceSnapshot {
     var fetchedAt: Date
 
     var symbol: String { currency == "USD" ? "$" : "¥" }
-    var totalText: String { String(format: "%@%.2f", symbol, total) }
+    var totalText: String { AppInfo.money(total, symbol: symbol) }
 }
 
 /// 查余额。直连官方接口，不走 DSH。
@@ -186,10 +186,23 @@ actor BalanceClient {
 
         var errorDescription: String? {
             switch self {
-            case .noKey: return "未找到 DEEPSEEK_API_KEY"
-            case .http(let code): return "接口返回 HTTP \(code)"
-            case .badPayload: return "响应结构异常"
-            case .transport(let msg): return "网络错误：\(msg)"
+            case .noKey:
+                return "没找到 API 密钥（~/.dsh/.credentials.yaml）"
+            case .http(let code):
+                // 只说「HTTP 401」用户没法判断该做什么，
+                // 这里直接给出可能原因和下一步。
+                switch code {
+                case 401: return "密钥无效或已过期"
+                case 403: return "密钥没有访问权限"
+                case 404: return "接口地址不对"
+                case 429: return "请求太频繁，稍后再试"
+                case 500...599: return "服务端异常（HTTP \(code)）"
+                default: return "接口返回 HTTP \(code)"
+                }
+            case .badPayload:
+                return "响应结构异常"
+            case .transport(let msg):
+                return "网络不通：\(msg)"
             }
         }
     }

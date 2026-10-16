@@ -49,11 +49,12 @@ enum SingleInstance {
 /// 应用委托：持有浮窗、菜单栏项、定时刷新。
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
-    private var floatWindow: FloatWindow?
+    var floatWindow: FloatWindow?
     private var presenter: BubblePresenter!
     private var analysisWindow: AnalysisWindowController?
     private var statusItem: NSStatusItem?
     private var refreshTimer: Timer?
+    private var balanceRefreshTimer: Timer?
     private let client = BalanceClient()
     var settings = Settings.load()
 
@@ -163,7 +164,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let win = FloatWindow(size: size)
         let view = win.whaleView
 // 单击浮窗 —— 出余额气泡。
-        view.onSingleClick = { [weak self] in self?.showBalanceBubble() }
+        // 单击的行为分两种：
+        //   · 平时            → 冒一下余额
+        //   · 正在等你回答时   → 跳到 DSH 去处理（对应上游 issue #238）
+        // 后者更符合直觉：气泡写着「等你回答」，点它自然是去回答。
+        view.onSingleClick = { [weak self] in
+            guard let self else { return }
+            if self.presenter.kind == .waiting {
+                self.presenter.hideNow()
+                self.jumpToDSH()
+                return
+            }
+            self.showBalanceBubble()
+        }
         // 双击保留摸摸头（形变 + 音效）
         view.onDoubleClick = { [weak self] in
             self?.floatWindow?.whaleView.poke()
@@ -198,6 +211,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// 单击鲸鱼 → 冒泡显示余额（10 秒后自动消失）。
+    /// 跳到 DSH 的界面。已在运行时浏览器会切到那个标签页。
+    func jumpToDSH() {
+        if let url = URL(string: "http://127.0.0.1:3080") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     private func showBalanceBubble() {
         presenter.show(.balance)
     }
@@ -269,7 +289,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// 菜单「记账明细…」。
     @objc func openLedger() {
-        if analysisWindow == nil { analysisWindow = AnalysisWindowController() }
+        if analysisWindow == nil {
+            let w = AnalysisWindowController()
+            // 窗口里那个「重启服务」按钮接到这里 ——
+            // DSH 卡住时不用去翻终端。
+            w.onRestartDSH = { [weak self] in self?.restartDSH() }
+            analysisWindow = w
+        }
         // 把主程序手上的可用性状态传进去，供指示灯判断
         analysisWindow?.lastBalanceOK = (lastError == nil && lastSnapshot != nil)
         analysisWindow?.lastBalanceError = lastError
@@ -621,14 +647,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func startRefreshLoop() {
         Task { await refreshOnce() }
-        // 每秒：走峰谷倒计时 + 检查是否有新轮次（两者都是本地读，无网络）
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+
+        // 两个定时器都必须加进 .common 模式。
+        //
+        // scheduledTimer 默认只挂 .default —— 一旦用户打开菜单或拖动窗口，
+        // RunLoop 会切到 .eventTracking，定时器就停了：
+        // 表现为「菜单开着的时候余额和倒计时不动」。
+        // 其它几处定时器早就用了 .common，这里当时漏了。
+
+        // 每秒：走峰谷倒计时 + 检查是否有新轮次（本地读，无网络）
+        let tickTimer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
+        RunLoop.main.add(tickTimer, forMode: .common)
+        refreshTimer = tickTimer
+
         // 余额每 60 秒拉一次
-        Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
+        let balanceTimer = Timer(timeInterval: 60.0, repeats: true) { [weak self] _ in
             Task { await self?.refreshOnce() }
         }
+        RunLoop.main.add(balanceTimer, forMode: .common)
+        balanceRefreshTimer = balanceTimer
     }
 
     private func refreshOnce() async {
