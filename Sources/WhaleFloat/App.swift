@@ -203,10 +203,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Self.statusChip("账本", ok: ledgerOK),
         ])
         chips.orientation = .horizontal
-        chips.spacing = 12
+        // 间距收紧：这一行总共只有 188pt 可用，
+        // 三个灯 + 按钮排不下就会把末尾的「账本」挤掉一个字。
+        chips.spacing = 6
 
         // 右侧：重启服务 —— 一件懒人操作，省得去菜单里翻
-        let restart = NSButton(title: "重启服务", target: nil, action: nil)
+        let restart = NSButton(title: "重启", target: nil, action: nil)
         restart.bezelStyle = .inline
         restart.font = .systemFont(ofSize: MenuPanelController.subFontSize)
         restart.contentTintColor = .controlAccentColor
@@ -219,6 +221,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
+        // 灯的压缩阻力设为必需：空间不够时压按钮，别把「账本」截成「账」
+        for chip in chips.arrangedSubviews {
+            chip.setContentCompressionResistancePriority(.required, for: .horizontal)
+        }
         let statusRow = NSStackView(views: [chips, spacer, restart])
         statusRow.orientation = .horizontal
         statusRow.alignment = .centerY
