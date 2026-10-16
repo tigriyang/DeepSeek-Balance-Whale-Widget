@@ -1,46 +1,85 @@
-// 本文件保留的是：AppInfo / ExternalLinks / ProcessManager / DSHLauncher。
-// 现在菜单改成了自绘的 MenuPanel（可内嵌图表、可翻页），MenuBuilder 已废弃删除。
-// 注：原先这里还有一个 MenuBuilder（用 NSMenu 搭右键菜单）。
+// AppInfo / ExternalLinks / ProcessManager / DSHLauncher / MenuBuilder。
 
 import AppKit
 
-/// 构建右键菜单与菜单栏菜单。
-///
-/// 用系统原生 NSMenu —— 自动获得 macOS 的外观、深色模式适配、键盘导航，
-/// 不自己画菜单。
 /// 状态栏图标的菜单。
 ///
-/// 注意：这只是**菜单栏图标**的下拉菜单（NSMenu 就够用）。
-/// 右键鲸鱼浮窗弹出的那个是自绘的 MenuPanel（要内嵌图表、要翻页）。
+/// 用系统原生 NSMenu —— 三个理由：
+///   · 「点菜单外面自动消失」是它的固有行为，不用自己监听鼠标
+///   · 二级菜单、勾选状态（NSMenuItem.state）、键盘导航都是现成的
+///   · 与系统其它菜单天然同款，不会有「两套样式」的问题
+///
+/// 放不进菜单的东西（折线图）走独立窗口，见 AnalysisWindowController。
 @MainActor
 enum MenuBuilder {
     static func build(target: AppDelegate) -> NSMenu {
         let m = NSMenu()
         m.autoenablesItems = false
-        add(m, "刷新余额", #selector(AppDelegate.refreshNow), target)
-        m.addItem(.separator())
+
+        add(m, "安装配套插件", #selector(AppDelegate.installPlugins), target)
+
+        // ── 桌宠设置 ──
+        let pet = NSMenu()
+        add(pet, "开启 / 关闭桌宠", #selector(AppDelegate.toggleFloat), target)
+        pet.addItem(.separator())
+        add(pet, "导入图片素材…", #selector(AppDelegate.importCharacter), target)
+        add(pet, "导入音效素材…", #selector(AppDelegate.importSound), target)
+        add(pet, "获取仓库素材…", #selector(AppDelegate.openAssetSource), target)
+        m.addItem(submenu("桌宠设置", pet))
+
+        // ── 高级设置 ──
+        let adv = NSMenu()
+        add(adv, "角色大小 100%", #selector(AppDelegate.setSizeLarge), target,
+            checked: target.settings.characterSize >= AppDelegate.sizeLarge)
+        add(adv, "角色大小 50%", #selector(AppDelegate.setSizeSmall), target,
+            checked: target.settings.characterSize < AppDelegate.sizeLarge)
+        adv.addItem(.separator())
+        add(adv, "气泡停留 10s", #selector(AppDelegate.setBubbleLong), target,
+            checked: target.settings.bubbleSeconds >= 7)
+        add(adv, "气泡停留 5s", #selector(AppDelegate.setBubbleShort), target,
+            checked: target.settings.bubbleSeconds < 7)
+        adv.addItem(.separator())
+        add(adv, "气泡内显示峰谷字", #selector(AppDelegate.toggleValley), target,
+            checked: target.settings.showValley)
+        add(adv, "气泡内显示时间", #selector(AppDelegate.toggleClock), target,
+            checked: target.settings.showClock)
+        add(adv, "启用事件音效", #selector(AppDelegate.toggleSound), target,
+            checked: target.settings.soundOn)
+        add(adv, "拖到边缘时吸附", #selector(AppDelegate.toggleSnap), target,
+            checked: target.settings.snapEnabled)
+        m.addItem(submenu("高级设置", adv))
+
         add(m, "分析…", #selector(AppDelegate.openLedger), target)
-        // 缺素材时程序是「仅状态栏」形态，必须留一条自救路径，
-        // 否则用户无从启用桌宠。
-        add(m, "导入角色图片…", #selector(AppDelegate.importCharacter), target)
-        add(m, "显示 / 隐藏桌宠", #selector(AppDelegate.toggleFloat), target)
+        m.addItem(.separator())
         add(m, "启动 DSH GUI", #selector(AppDelegate.launchDSH), target)
         add(m, "充值 / 查看用量…", #selector(AppDelegate.openBilling), target)
         m.addItem(.separator())
-        add(m, "完全退出（并关闭 DSH）", #selector(AppDelegate.quitEverything), target)
         add(m, "退出浮窗", #selector(AppDelegate.quit), target)
+        add(m, "退出 DSH", #selector(AppDelegate.quitEverything), target)
         return m
     }
 
-    private static func add(_ m: NSMenu, _ title: String, _ sel: Selector, _ target: AnyObject) {
+    /// 一个带子菜单的顶层项。
+    private static func submenu(_ title: String, _ menu: NSMenu) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.submenu = menu
+        return item
+    }
+
+    private static func add(_ m: NSMenu, _ title: String, _ sel: Selector,
+                            _ target: AnyObject, checked: Bool = false) {
         let item = NSMenuItem(title: title, action: sel, keyEquivalent: "")
         item.target = target
+        // 勾选状态用系统的那一套，而不是自己在标题里拼「✓」
+        item.state = checked ? .on : .off
         m.addItem(item)
     }
 }
 
-
 enum AppInfo {
+    /// 次要文字的字号（菜单、面板里的说明与数值统一用它）。
+    static let subFontSize: CGFloat = 12
+
     static let version = "0.1.1"
 }
 

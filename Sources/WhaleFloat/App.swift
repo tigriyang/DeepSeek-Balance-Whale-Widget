@@ -18,25 +18,55 @@ enum WhaleFloatApp {
     }
 }
 
+/// 单实例守卫。
+///
+/// 为什么必须要：首次运行会写 launchd 配置并 launchctl load -w，
+/// 而配置里 RunAtLoad=true —— 于是刚启动的这个进程会在同一时刻
+/// 被 launchd 又拉起来一份。结果就是两只鲸鱼完全重叠（肉眼看不出来），
+/// 通知还会重复推送。
+///
+/// 用文件锁而不是 NSRunningApplication 查询：后者依赖 bundle id，
+/// 而经 LaunchServices 启动时进程拿到的可能是临时标识，查不到。
+enum SingleInstance {
+    /// 持有 fd 才不会释放锁（close 即解锁）。只由主线程写入。
+    nonisolated(unsafe) private static var lockFD: Int32 = -1
+
+    static func acquire() -> Bool {
+        let path = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".dsh/.whalefloat.lock").path
+        let fd = open(path, O_CREAT | O_RDWR, 0o644)
+        // 连锁文件都开不了时不要拦 —— 宁可多开一份，也别让用户完全起不来
+        guard fd >= 0 else { return true }
+        if flock(fd, LOCK_EX | LOCK_NB) != 0 {
+            close(fd)
+            return false
+        }
+        lockFD = fd
+        return true
+    }
+}
+
 /// 应用委托：持有浮窗、菜单栏项、定时刷新。
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var floatWindow: FloatWindow?
     private var presenter: BubblePresenter!
     private var analysisWindow: AnalysisWindowController?
-    private var menuPanel: MenuPanelController?
     private var statusItem: NSStatusItem?
     private var refreshTimer: Timer?
     private let client = BalanceClient()
-    private var settings = Settings.load()
+    var settings = Settings.load()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // 单实例守卫必须放在最前面 —— 宁可什么都不做，也别多起一只鲸鱼。
+        guard SingleInstance.acquire() else {
+            NSLog("WhaleFloat: 已有实例在跑，本次启动退出")
+            NSApp.terminate(nil)
+            return
+        }
+
         buildStatusItem()
 
-        // 菜单控制器在启动时就建好。
-        // 之前只在「右键浮窗」那条路径里懒加载，导致状态栏点图标时
-        // menuPanel 还是 nil，menuPanel?.toggle() 静默失败 —— 表现为点了没反应。
-        buildMenuPanel()
 
         // 素材就绪才创建浮窗 —— 否则开箱就是一只空白方块。
         // 缺素材时退化为「只有状态栏图标」的形态：
@@ -47,6 +77,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSLog("WhaleFloat: 未找到角色素材，以「仅状态栏」模式启动")
         }
         startRefreshLoop()
+
+        // 日历访问：用于判断「今天是不是法定假日」。
+        // 不是敏感权限（只读节假日标记，不读用户自己的日程），
+        // 首次会弹一次系统授权框，拒绝也不影响其它功能。
+        SystemHoliday.requestAccessIfNeeded()
+
+        // 节假日数据：内置快照已随包，这里静默检查一次更新
+        // （今年与明年；明年通常在 11 月前后才公布，拉不到就跳过）。
+        HolidayCalendar.refresh()
 
         // 对话输出 → 系统通知（带回复框）。首次会弹一次系统授权对话框。
         NotifyBridge.shared.start()
@@ -65,8 +104,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// 首次运行时安装 launchd 自启。
     ///
-    /// plist 模板随包（Resources/launchagent.plist），里面的 __HOME__ 在这里
-    /// 替换成实际路径 —— launchd 不做变量展开，只能安装时定死。
+    /// plist 模板随包（Resources/launchagent.plist）。路径写死为
+    /// /Applications/WhaleFloat.app —— 安装位置是固定的，不需要占位符。
     private func installLaunchAgentIfNeeded() {
         let fm = FileManager.default
         let label = "ai.dsh.whalefloat"
@@ -76,8 +115,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !fm.fileExists(atPath: dst.path) else { return }
         guard let tpl = Bundle.main.url(forResource: "launchagent", withExtension: "plist"),
               let raw = try? String(contentsOf: tpl, encoding: .utf8) else { return }
-        let home = fm.homeDirectoryForCurrentUser.path
-        let content = raw.replacingOccurrences(of: "__HOME__", with: home)
+        // 不再需要替换占位符 —— plist 里写的是固定的 /Applications 路径
+        let content = raw
         do {
             try fm.createDirectory(at: dst.deletingLastPathComponent(),
                                    withIntermediateDirectories: true)
@@ -89,6 +128,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSLog("WhaleFloat: 已安装 launchd 自启")
         } catch {
             NSLog("WhaleFloat: 自启安装失败 \(error.localizedDescription)")
+        }
+    }
+
+    /// 菜单即将展开 —— 用最新的设置重建一次，勾选才是对的。
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        let fresh = MenuBuilder.build(target: self)
+        menu.removeAllItems()
+        for item in fresh.items {
+            fresh.removeItem(item)
+            menu.addItem(item)
         }
     }
 
@@ -161,108 +210,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - 菜单子页内容
 
     /// 分析页：汇总 + 折线图 + 可用性指示灯。
-    private func analysisViews(_ owner: MenuPanelController) -> [NSView] {
-        let led = TurnLedger.load()
-        let events = (led?.events ?? []).sorted { $0.ts < $1.ts }
-
-        var parts: [String] = []
-        if let bal = led?.lastBalance { parts.append(String(format: "余额 ¥%.2f", bal)) }
-        if let used = led?.todayUsage { parts.append(String(format: "今日 ¥%.2f", used)) }
-        parts.append("\(events.count) 轮")
-
-        let summary = NSTextField(labelWithString: parts.joined(separator: "   "))
-        summary.font = .monospacedDigitSystemFont(ofSize: MenuPanelController.subFontSize, weight: .regular)
-        summary.alignment = .center
-        summary.translatesAutoresizingMaskIntoConstraints = false
-        summary.widthAnchor.constraint(equalToConstant: owner.currentContentWidth).isActive = true
-
-        let recent = events.suffix(40)
-        let chart = SparkChartView()
-        chart.points = recent.map {
-            SparkChartView.Point(date: $0.date, value: Double($0.tokens))
-        }
-        chart.translatesAutoresizingMaskIntoConstraints = false
-        chart.widthAnchor.constraint(equalToConstant: owner.currentContentWidth).isActive = true
-        chart.heightAnchor.constraint(equalToConstant: 96).isActive = true
-
-        let total = recent.reduce(0) { $0 + $1.tokens }
-        let caption = NSTextField(labelWithString:
-            "最近 \(recent.count) 轮（合计 \(WhaleView.formatTokens(total))）")
-        caption.font = .systemFont(ofSize: MenuPanelController.subFontSize)
-        caption.textColor = .tertiaryLabelColor
-        caption.alignment = .center
-        caption.translatesAutoresizingMaskIntoConstraints = false
-        caption.widthAnchor.constraint(equalToConstant: owner.currentContentWidth).isActive = true
-
-        // 可用性
-        let dshUp = Self.isDSHRunning()
-        let apiOK = (lastError == nil && lastSnapshot != nil)
-        let ok = dshUp && apiOK
-
-        let dot = NSTextField(labelWithString: ok ? "●" : "●")
-        dot.font = .systemFont(ofSize: MenuPanelController.subFontSize)
-        dot.textColor = ok ? .systemGreen : .systemRed
-
-        let statusText = NSTextField(labelWithString: ok ? "服务正常" : "服务异常")
-        statusText.font = .systemFont(ofSize: MenuPanelController.subFontSize)
-        statusText.textColor = ok ? .systemGreen : .systemRed
-
-        var detail: [String] = [dshUp ? "DSH 运行中" : "DSH 未运行"]
-        detail.append(apiOK ? "余额接口可达" : "余额接口不可用")
-        let detailLabel = NSTextField(labelWithString: detail.joined(separator: " · "))
-        detailLabel.font = .systemFont(ofSize: MenuPanelController.subFontSize)
-        detailLabel.textColor = .secondaryLabelColor
-
-        // ── 三个状态灯 + 重启 ──
-        // 各自独立：服务在不在、接口通不通、账本能不能读，
-        // 一个问题会牵动哪几个一目了然。
-        let ledgerOK = !events.isEmpty
-        let chips = NSStackView(views: [
-            Self.statusChip("服务", ok: dshUp),
-            Self.statusChip("接口", ok: apiOK),
-            Self.statusChip("账本", ok: ledgerOK),
-        ])
-        chips.orientation = .horizontal
-        // 间距收紧：这一行总共只有 188pt 可用，
-        // 三个灯 + 按钮排不下就会把末尾的「账本」挤掉一个字。
-        chips.spacing = 6
-
-        // 右侧：重启服务 —— 一件懒人操作，省得去菜单里翻
-        let restart = NSButton(title: "重启", target: nil, action: nil)
-        restart.bezelStyle = .inline
-        restart.font = .systemFont(ofSize: MenuPanelController.subFontSize)
-        restart.contentTintColor = .controlAccentColor
-        let rbox = ActionBox(button: restart) { [weak self] in
-            self?.menuPanel?.hide()
-            self?.restartDSH()
-        }
-        objc_setAssociatedObject(restart, "whalefloat.restartbox", rbox, .OBJC_ASSOCIATION_RETAIN)
-
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-
-        // 灯的压缩阻力设为必需：空间不够时压按钮，别把「账本」截成「账」
-        for chip in chips.arrangedSubviews {
-            chip.setContentCompressionResistancePriority(.required, for: .horizontal)
-        }
-        let statusRow = NSStackView(views: [chips, spacer, restart])
-        statusRow.orientation = .horizontal
-        statusRow.alignment = .centerY
-        statusRow.spacing = 6
-        statusRow.edgeInsets = NSEdgeInsets(top: 0, left: 14, bottom: 0, right: 14)
-        statusRow.translatesAutoresizingMaskIntoConstraints = false
-        statusRow.widthAnchor.constraint(equalToConstant: owner.currentContentWidth).isActive = true
-
-        return [summary, caption, chart, statusRow]
-    }
-
     /// 一个状态灯：圆点 + 名称。绿=正常，红=异常。
     private static func statusChip(_ name: String, ok: Bool) -> NSView {
         let dot = NSTextField(labelWithString: "●")
-        dot.font = .systemFont(ofSize: MenuPanelController.subFontSize)
+        dot.font = .systemFont(ofSize: AppInfo.subFontSize)
         dot.textColor = ok ? .systemGreen : .systemRed
         let text = NSTextField(labelWithString: name)
-        text.font = .systemFont(ofSize: MenuPanelController.subFontSize)
+        text.font = .systemFont(ofSize: AppInfo.subFontSize)
         text.textColor = .secondaryLabelColor
         let row = NSStackView(views: [dot, text])
         row.orientation = .horizontal
@@ -284,67 +238,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// 设置页：紧凑的行式控件（菜单形态，不是原来的表单窗口）。
-    private func settingsViews(_ owner: MenuPanelController) -> [NSView] {
-        // 不再需要页首 spacer —— stack 自己的 top padding 已经提供留白，
-        // 再加一个会让顶部变成 5+8=13，跟底部（5）不对称。
-        var views: [NSView] = []
-        // 每行一个选项，右侧打勾 —— 系统菜单的规范样式。
-        // 两档固定值，不做连续调节：既避免半像素缩放，也省掉一个控件。
-        views.append(Self.choiceRow("角色大小（100%）", selected: settings.characterSize == Self.sizeLarge,
-                                    width: owner.currentContentWidth) { [weak self] in
-            self?.applyCharacterSize(Self.sizeLarge)
-        })
-        views.append(Self.choiceRow("角色大小（50%）", selected: settings.characterSize != Self.sizeLarge,
-                                    width: owner.currentContentWidth) { [weak self] in
-            self?.applyCharacterSize(Self.sizeSmall)
-        })
-        views.append(Self.choiceRow("气泡停留（10s）", selected: settings.bubbleSeconds >= 7,
-                                    width: owner.currentContentWidth) { [weak self] in
-            self?.applyBubbleSeconds(10)
-        })
-        views.append(Self.choiceRow("气泡停留（5s）", selected: settings.bubbleSeconds < 7,
-                                    width: owner.currentContentWidth) { [weak self] in
-            self?.applyBubbleSeconds(4)
-        })
-        views.append(Self.toggleRow2("气泡内显示峰谷字", settings.showValley, width: owner.currentContentWidth) { [weak self] on in
-            guard let self else { return }
-            self.settings.showValley = on
-            self.settings.save()
-            self.floatWindow?.whaleView.showsValley = on
-            self.floatWindow?.whaleView.needsLayout = true
-            self.menuPanel?.refreshCurrentPage()
-        })
-        views.append(Self.toggleRow2("气泡内显示时间", settings.showClock, width: owner.currentContentWidth) { [weak self] on in
-            guard let self else { return }
-            self.settings.showClock = on
-            self.settings.save()
-            self.floatWindow?.whaleView.showsClock = on
-            self.menuPanel?.refreshCurrentPage()
-            self.floatWindow?.whaleView.needsLayout = true
-        })
-        views.append(Self.toggleRow2("启用事件音效", settings.soundOn, width: owner.currentContentWidth) { [weak self] on in
-            guard let self else { return }
-            self.settings.soundOn = on
-            self.settings.save()
-            self.floatWindow?.whaleView.setSoundEnabled(on)
-            self.menuPanel?.refreshCurrentPage()
-        })
-        views.append(Self.toggleRow2("拖到边缘时吸附", settings.snapEnabled, width: owner.currentContentWidth) { [weak self] on in
-            guard let self else { return }
-            self.settings.snapEnabled = on
-            self.settings.save()
-            self.floatWindow?.snapEnabled = on
-            self.menuPanel?.refreshCurrentPage()
-        })
-        views.append(Self.settingsButton("导入角色图片…", width: owner.currentContentWidth) { [weak self] in
-            self?.importCharacter()
-        })
-        views.append(Self.settingsButton("获取角色素材…", width: owner.currentContentWidth) { [weak self] in
-            self?.openAssetSource()
-        })
-        return views
-    }
-
     // MARK: - 设置页的小组件
 
     /// 设置页里每一行的统一高度 —— 行高一致，间距才看起来均匀。
@@ -357,128 +250,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     static let sizeLarge: CGFloat = 304
     static let sizeSmall: CGFloat = 152
 
-    private static let rowHeight: CGFloat = 20
-
-    /// 行与行之间的**唯一**间距来源。
-    ///
-    /// 规则：每行 top 一律 0、bottom 一律 rowGap、高度一律 rowHeight。
-    /// 整页只有这三个数在起作用 —— 不再为「标签紧贴控件」单开一种间距，
-    /// 那种小聪明会让页面上出现两种节奏，怎么调都显得不齐。
-    private static let rowGap: CGFloat = 8
-
-    private static func settingsNote(_ text: String, width: CGFloat) -> NSView {
-        let l = NSTextField(labelWithString: text)
-        l.font = .systemFont(ofSize: MenuPanelController.subFontSize)
-        l.textColor = .secondaryLabelColor
-        let row = NSStackView(views: [l])
-        // 与其它行**完全同构**：同样的高度、同样的间距。
-        // 之前这行既没有高度约束、bottom 又与别行不同（3 vs 8），
-        // 于是高度和间距各有两个来源，怎么调都对不齐。
-        row.heightAnchor.constraint(equalToConstant: Self.rowHeight).isActive = true
-        row.edgeInsets = NSEdgeInsets(top: 0, left: 14, bottom: Self.rowGap, right: 14)
-        row.translatesAutoresizingMaskIntoConstraints = false
-        row.widthAnchor.constraint(equalToConstant: width).isActive = true
-        return row
-    }
-
-    /// 一行一个选项：左边文字，右边在选中时打个勾。
-    ///
-    /// 取代了「标签 + 滑块」的两行结构：两行时为了让标签贴住控件，
-    /// 必须再造一种更小的间距，页面上就有两种节奏。现在每行即一个语义单元，
-    /// 全页一种间距。
-    /// 二选一中的一行。
-    private static func choiceRow(_ title: String, selected: Bool, width: CGFloat,
-                                  onSelect: @escaping () -> Void) -> NSView {
-        checkRow(title, checked: selected, width: width, onToggle: onSelect)
-    }
-
-    /// 开关行 —— 与二选一**同构**（左文字、右打勾），点一下翻转。
-    ///
-    /// 之前这里用的是系统 NSButton(checkboxWithTitle:)，勾在**左**边，
-    /// 而二选一的勾在右边，同一页出现两种样式。现在统一走 checkRow。
-    private static func toggleRow2(_ title: String, _ on: Bool, width: CGFloat,
-                                   onChange: @escaping (Bool) -> Void) -> NSView {
-        checkRow(title, checked: on, width: width) { onChange(!on) }
-    }
-
-    /// 二选一行 —— 语义上「同组内只有一个选中」，实现与开关相同。
-    private static func checkRow(_ title: String, checked: Bool,
-                                 width: CGFloat,
-                                 onToggle: @escaping () -> Void) -> NSView {
-        let label = NSTextField(labelWithString: title)
-        label.font = .systemFont(ofSize: MenuPanelController.subFontSize)
-        label.textColor = .labelColor
-
-        let check = NSTextField(labelWithString: checked ? "✓" : "")
-        check.font = .systemFont(ofSize: MenuPanelController.subFontSize, weight: .medium)
-        check.textColor = checked ? .controlAccentColor : .clear
-        check.alignment = .right
-        check.translatesAutoresizingMaskIntoConstraints = false
-        check.widthAnchor.constraint(equalToConstant: 16).isActive = true
-
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-
-        let row = NSStackView(views: [label, spacer, check])
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.heightAnchor.constraint(equalToConstant: Self.rowHeight).isActive = true
-        row.edgeInsets = NSEdgeInsets(top: 0, left: 14, bottom: Self.rowGap, right: 14)
-        row.translatesAutoresizingMaskIntoConstraints = false
-        row.widthAnchor.constraint(equalToConstant: width).isActive = true
-
-        // 整行可点
-        let box = ActionBox(button: NSButton()) { onToggle() }
-        objc_setAssociatedObject(row, "whalefloat.checkrow", box, .OBJC_ASSOCIATION_RETAIN)
-        row.addGestureRecognizer(
-            NSClickGestureRecognizer(target: box, action: #selector(ActionBox.trigger)))
-        return row
-    }
-
-    private static func settingsButton(_ title: String, width: CGFloat,
-                                       onClick: @escaping () -> Void) -> NSView {
-        let btn = NSButton(title: title, target: nil, action: nil)
-        btn.bezelStyle = .inline
-        btn.font = .systemFont(ofSize: MenuPanelController.subFontSize)
-        btn.heightAnchor.constraint(equalToConstant: Self.rowHeight).isActive = true
-        let box = ActionBox(button: btn, onClick: onClick)
-        objc_setAssociatedObject(btn, "whalefloat.actionbox", box, .OBJC_ASSOCIATION_RETAIN)
-        let row = NSStackView(views: [btn])
-        row.edgeInsets = NSEdgeInsets(top: 0, left: 14, bottom: Self.rowGap, right: 14)
-        row.translatesAutoresizingMaskIntoConstraints = false
-        row.widthAnchor.constraint(equalToConstant: width).isActive = true
-        return row
-    }
-
     /// 装配菜单面板的主菜单项与两个子页。
-    private func buildMenuPanel() {
-        let panel = MenuPanelController()
-        // 快捷键占用 ⌥1…⌥7（分隔线不占号）。
-        // 右侧留白正好显示提示，和系统菜单一致。
-        // 除「分析 / 高级设置」（原地翻页）外，执行动作前都先收起菜单 ——
-        // 点菜单项后菜单还杵在那儿是不对的。
-        panel.mainItems = [
-            ("刷新余额", false, { [weak self] in self?.menuPanel?.hide(); self?.refreshNow() }, "⌥1"),
-            ("-", false, {}, nil),
-            ("分析", false, { [weak self] in self?.menuPanel?.show(.analysis) }, "⌥2"),
-            ("高级设置", false, { [weak self] in self?.menuPanel?.show(.settings) }, "⌥3"),
-            ("-", false, {}, nil),
-            ("启动 DSH GUI", false, { [weak self] in self?.menuPanel?.hide(); self?.launchDSH() }, "⌥4"),
-            ("安装配套插件…", false, { [weak self] in self?.menuPanel?.hide(); self?.installPlugins() }, "⌥5"),
-            ("充值 / 查看用量…", false, { [weak self] in self?.menuPanel?.hide(); self?.openBilling() }, "⌥6"),
-            ("-", false, {}, nil),
-            ("退出 DSH", false, { [weak self] in self?.quitEverything() }, "⌥7"),
-            ("退出浮窗", false, { [weak self] in self?.quit() }, "⌥8"),
-        ]
-        // 气泡锚定到鲸鱼浮窗的视图上（NSPopover 需要锚点）
-        panel.anchorViewProvider = { [weak self] in
-            self?.floatWindow?.whaleView
-        }
-        panel.analysisBuilder = { [weak self] owner in self?.analysisViews(owner) ?? [] }
-        panel.settingsBuilder = { [weak self] owner in self?.settingsViews(owner) ?? [] }
-        menuPanel = panel
-    }
-
     /// 菜单「安装配套插件…」：手动触发（补装 / 重装）。
     @objc func installPlugins() {
         let missing = PluginInstaller.missing()
@@ -513,7 +285,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.characterSize = v
         settings.save()
         floatWindow?.applySize(v)
-        menuPanel?.refreshCurrentPage()
     }
 
     /// 应用气泡停留档位。同样要重建面板（理由同上）。
@@ -521,7 +292,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.bubbleSeconds = v
         settings.save()
         presenter.autoHideSeconds = v
-        menuPanel?.refreshCurrentPage()
+    }
+
+    // MARK: - 菜单动作（高级设置）
+
+    @objc func setSizeLarge() { applyCharacterSize(Self.sizeLarge) }
+    @objc func setSizeSmall() { applyCharacterSize(Self.sizeSmall) }
+    @objc func setBubbleLong() { applyBubbleSeconds(10) }
+    @objc func setBubbleShort() { applyBubbleSeconds(5) }
+
+    @objc func toggleValley() {
+        settings.showValley.toggle()
+        settings.save()
+        floatWindow?.whaleView.showsValley = settings.showValley
+        floatWindow?.whaleView.needsLayout = true
+    }
+
+    @objc func toggleClock() {
+        settings.showClock.toggle()
+        settings.save()
+        floatWindow?.whaleView.showsClock = settings.showClock
+    }
+
+    @objc func toggleSound() {
+        settings.soundOn.toggle()
+        settings.save()
+        floatWindow?.whaleView.setSoundEnabled(settings.soundOn)
+    }
+
+    @objc func toggleSnap() {
+        settings.snapEnabled.toggle()
+        settings.save()
+        floatWindow?.snapEnabled = settings.snapEnabled
+    }
+
+    /// 菜单「导入音效素材…」—— 选两个 mp3，分别作为按下 / 松开音。
+    @objc func importSound() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.mp3, .mpeg4Audio, .wav, .aiff]
+        panel.message = "选择 1~2 个音效（第一个作按下音，第二个作松开音）"
+        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
+        let fm = FileManager.default
+        do {
+            try fm.createDirectory(at: Settings.assetsDir, withIntermediateDirectories: true)
+            let names = ["press-down.mp3", "press-up.mp3"]
+            for (i, src) in panel.urls.prefix(2).enumerated() {
+                let dst = Settings.assetsDir.appendingPathComponent(names[i])
+                if fm.fileExists(atPath: dst.path) { try fm.removeItem(at: dst) }
+                try fm.copyItem(at: src, to: dst)
+            }
+            // 只给了一个 → 松开音沿用同一个
+            if panel.urls.count == 1 {
+                let dst = Settings.assetsDir.appendingPathComponent("press-up.mp3")
+                if fm.fileExists(atPath: dst.path) { try fm.removeItem(at: dst) }
+                try fm.copyItem(at: panel.urls[0], to: dst)
+            }
+            floatWindow?.whaleView.reloadSounds()
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "导入音效失败"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
     }
 
     /// 「获取角色素材…」—— 只指路，不代劳。
@@ -638,21 +472,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             accessibilityDescription: "WhaleFloat"
         )
         item.button?.image?.isTemplate = true
-        item.button?.target = self
-        item.button?.action = #selector(statusItemClicked(_:))
-        // 左右键都唤起同一个自绘菜单。
-        // 不用 item.menu（那是系统 NSMenu，外观与自绘面板对不上，
-        // 而且内容还少几项）。
-        item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        // 顺序要紧：先存下 statusItem，再建菜单 ——
+        // rebuildStatusMenu 是读 statusItem 的，反过来的话它拿到 nil 就直接返回了，
+        // 表现为「点图标没反应」。
         statusItem = item
+        // 用系统菜单：点外面自动消失、二级菜单、勾选状态都是现成的。
+        rebuildStatusMenu()
     }
 
-    /// 状态栏图标被点 —— 唤起自绘菜单。
-    @objc func statusItemClicked(_ sender: NSStatusBarButton) {
-        if menuPanel == nil { buildMenuPanel() }
-        menuPanel?.anchorViewProvider = { sender }
-        menuPanel?.preferredEdge = .maxY      // 图标在顶栏，菜单朝下弹
-        menuPanel?.toggle()
+    /// 重建状态栏菜单（设置变化后、每次打开前调用）。
+    ///
+    /// 重建而不是改已有项：档位只有一个能被勾选，重建最不容易出错。
+    func rebuildStatusMenu() {
+        guard let item = statusItem else { return }
+        let menu = MenuBuilder.build(target: self)
+        menu.delegate = self
+        item.menu = menu
     }
 
     /// 供菜单项调用的动作集合。
@@ -687,6 +522,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func launchDSH() {
         DSHLauncher.launch()
+    }
+
+    /// 菜单「卸载 WhaleFloat…」。
+    ///
+    /// 做三件事：卸自启、摘插件、把 app 本体移进废纸篓。
+    /// 设置与账本保留（重装后还能用），要一并清掉请跑 uninstall.sh --purge。
+    ///
+    /// 为什么不只靠「拖进废纸篓」：那样 launchd 配置和 DSH 插件会留下来，
+    /// 系统会一直尝试拉起一个不存在的程序。
+    /// （plist 里已加 PathState 兜底，但主动清一次更干净。）
+    @objc func uninstallSelf() {
+        let alert = NSAlert()
+        alert.messageText = "卸载小鲸鱼？"
+        alert.informativeText = """
+            会做三件事：
+              · 移除开机自启
+              · 从 DSH 里摘除配套插件
+              · 把应用移进废纸篓
+
+            设置与账本会保留。要彻底清空请运行仓库里的 uninstall.sh --purge。
+            """
+        alert.addButton(withTitle: "卸载")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        // ① 自启
+        let plist = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents/ai.dsh.whalefloat.plist")
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        p.arguments = ["unload", plist.path]
+        try? p.run()
+        p.waitUntilExit()
+        try? FileManager.default.removeItem(at: plist)
+
+        // ② 插件引用
+        PluginInstaller.removeAllQuietly()
+
+        // ③ 本体进废纸篓
+        let bundle = Bundle.main.bundleURL
+        NSWorkspace.shared.recycle([bundle]) { _, _ in
+            DispatchQueue.main.async { NSApp.terminate(nil) }
+        }
     }
 
     /// 菜单「退出浮窗」：只退本程序。

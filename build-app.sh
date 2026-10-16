@@ -15,7 +15,10 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="WhaleFloat"
 BUNDLE_ID="ai.dsh.whalefloat"
 VERSION="0.1.0"
-DEST="$HOME/Applications/${APP_NAME}.app"
+# 装到系统的 /Applications —— Finder 侧边栏「应用程序」指向的是这里，
+# 装到 ~/Applications 的话在侧边栏里看不到，也不符合拖进「应用程序」的直觉。
+# 普通用户对 /Applications 有写权限，不需要 sudo。
+DEST="/Applications/${APP_NAME}.app"
 
 echo "▸ 编译 release 版本…"
 cd "$HERE"
@@ -37,6 +40,14 @@ for ext in png gif mp3 wav icns; do
     [ -f "$f" ] && cp "$f" "$DEST/Contents/Resources/"
   done
 done
+
+# 内置法定节假日数据（官方发布，见 HolidayCalendar.swift）。
+# 随包放几年，离线也能用；联网后会自行更新到更新的年份。
+if [ -d "$HERE/Resources/holidays" ]; then
+  rm -rf "$DEST/Contents/Resources/holidays"
+  cp -R "$HERE/Resources/holidays" "$DEST/Contents/Resources/holidays"
+  echo "  内置节假日数据：$(ls "$HERE/Resources/holidays" | tr '\n' ' ')"
+fi
 
 # 内置 launchd 模板 —— 首次运行时程序自己装自启，
 # 这样从 DMG 拖进「应用程序」就能用，不需要再跑 install.sh。
@@ -86,6 +97,12 @@ cat > "$DEST/Contents/Info.plist" <<PLIST
     <!-- 进 Dock，有图标（可在 Dock 上右键退出/切换） -->
     <key>LSUIElement</key><false/>
     <key>NSHighResolutionCapable</key><true/>
+    <!-- 读系统日历只为判断「今天是不是法定假日」。
+         没有这一项时系统不会弹授权框，而是直接拒绝。 -->
+    <key>NSCalendarsUsageDescription</key>
+    <string>读取「中国大陆节假日」日历，用于判断当前是高峰还是低谷计价。只读节假日标记，不读你个人的日程。</string>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>读取「中国大陆节假日」日历，用于判断当前是高峰还是低谷计价。只读节假日标记，不读你个人的日程。</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
 </dict>
 </plist>

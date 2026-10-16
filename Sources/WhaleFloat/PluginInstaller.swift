@@ -126,12 +126,48 @@ enum PluginInstaller {
                 try p.run()
                 p.waitUntilExit()
                 if p.terminationStatus == 0 { ok += 1 }
+                else {
+                    // 失败时必须把子进程的输出留下 ——
+                    // 之前只看 exit status，失败时什么都不记，
+                    // 排查时完全不知道 dsh 报了什么。
+                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                    let out = String(data: data, encoding: .utf8)?
+                        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    log.append("\(name): 退出码 \(p.terminationStatus)"
+                        + (out.isEmpty ? "" : " — \(out.prefix(400))"))
+                }
             } catch {
                 log.append("\(name): \(error.localizedDescription)")
             }
         }
         if ok == names.count { return "已注册 \(ok) 个插件进 DSH 的 web profile。" }
         return (["⚠ 注册了 \(ok)/\(names.count) 个"] + log).joined(separator: "\n")
+    }
+
+    /// dsh 可执行文件的位置（摘插件时要调它）。
+    private static var dshExecutable: String? {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let candidates = [
+            "\(home)/.npm-global/bin/dsh",
+            "\(home)/.local/bin/dsh",
+            "/usr/local/bin/dsh",
+            "/opt/homebrew/bin/dsh",
+        ]
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    /// 从 DSH 的 profile 里摘除本程序带的插件（卸载时用）。
+    static func removeAllQuietly() {
+        guard let dsh = dshExecutable else { return }
+        for name in bundled {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: dsh)
+            p.arguments = ["plugin", "--profile", "web", "remove", name]
+            p.standardOutput = FileHandle.nullDevice
+            p.standardError = FileHandle.nullDevice
+            try? p.run()
+            p.waitUntilExit()
+        }
     }
 
     /// 用户主动点菜单时的安装 —— 这条路径可以弹框，

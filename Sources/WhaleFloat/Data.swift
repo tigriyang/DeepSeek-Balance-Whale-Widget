@@ -10,23 +10,7 @@ enum PeakValley {
     /// 高峰时段（北京时间，[起, 止)，小时制）。
     static let peakHours: [(start: Int, end: Int)] = [(9, 12), (14, 18)]
 
-    /// 2026 年法定节假日（全天谷价）。来自鲸鱼插件的 HOLIDAY_VALLEY。
-    static let holidays: Set<String> = [
-        "2026-01-01", "2026-01-02", "2026-01-03",
-        "2026-02-15", "2026-02-16", "2026-02-17", "2026-02-18", "2026-02-19",
-        "2026-02-20", "2026-02-21", "2026-02-22", "2026-02-23",
-        "2026-04-04", "2026-04-05", "2026-04-06",
-        "2026-05-01", "2026-05-02", "2026-05-03", "2026-05-04", "2026-05-05",
-        "2026-06-19", "2026-06-20", "2026-06-21",
-        "2026-09-25", "2026-09-26", "2026-09-27",
-        "2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04",
-        "2026-10-05", "2026-10-06", "2026-10-07",
-    ]
-
-    /// 调休上班的周末（这些日子按工作日算峰谷）。
-    static let makeupWorkdays: Set<String> = [
-        "2026-01-04", "2026-05-09", "2026-09-20", "2026-10-10",
-    ]
+    /// 节假日数据改由 HolidayCalendar 提供（官方发布，不硬编码年份）。
 
     /// 中文星期，用于显示。
     static func weekdayZh(_ date: Date) -> String {
@@ -45,16 +29,24 @@ enum PeakValley {
     }
 
     /// 是否处于高峰计价。全部按北京时间判定。
+    ///
+    /// 节假日数据来自官方发布（见 HolidayCalendar），不再硬编码年份 ——
+    /// 往年那种写法一到次年就静默失效。
     static func isPeak(at date: Date = Date()) -> Bool {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(identifier: "Asia/Shanghai") ?? .current
-        let key = dayKey(date)
-        // 法定节假日 → 全天谷价（优先级最高）
-        if holidays.contains(key) { return false }
-        let weekday = cal.component(.weekday, from: date)  // 1=周日 7=周六
-        let isWeekend = (weekday == 1 || weekday == 7)
-        // 周末默认谷价，但调休上班的周末按工作日
-        if isWeekend && !makeupWorkdays.contains(key) { return false }
+        // 今天这一刻优先问系统日历 —— 用户订阅的节假日日历是权威源，
+        // 且不需要我们去维护年份。查不到（未授权/未订阅）则返回 nil，往下走。
+        if cal.isDateInToday(date), let fromSystem = SystemHoliday.isTodayHoliday() {
+            if fromSystem { return false }   // 法定假日 → 全天谷价
+            // 不是假日时不能就此断定「按工作日」——今天可能是调休的周末，
+            // 那要上班。交给下面的周末判断，它读得到 JSON 里的补班数据。
+        }
+
+        // 其余日期（含未来，倒计时要用）：走本地数据。
+        // 法定假日全谷价；补班的周末在这里返回 false，于是按工作日继续判时段。
+        // 数据缺失时退化为「周末算假日」。
+        if HolidayCalendar.isOffDay(date) { return false }
         let hour = cal.component(.hour, from: date)
         for slot in peakHours where hour >= slot.start && hour < slot.end {
             return true
