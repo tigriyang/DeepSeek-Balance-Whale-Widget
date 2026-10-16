@@ -100,10 +100,65 @@ final class NotifyBridge: NSObject, UNUserNotificationCenterDelegate {
         if seen.count > 500 { seen.removeAll() }
     }
 
+    /// 把 Markdown 标记剥成纯文本。
+    ///
+    /// 通知栏不解析 Markdown，原样送过去会在正文里冒出 `**`、`#`、`|` 这些符号，
+    /// 读起来很怪。这里只做「去标记」，不做渲染。
+    ///
+    /// 正则一律用原始字符串（#"..."#）—— 否则反斜杠要双写，可读性极差。
+    static func plainText(from markdown: String) -> String {
+        var t = markdown
+
+        // 代码围栏：去掉围栏那一行，保留里面的代码
+        t = t.replacingOccurrences(of: #"(?m)^\s*```[a-zA-Z]*\s*$"#,
+                                   with: "", options: .regularExpression)
+        // 行内代码的反引号
+        t = t.replacingOccurrences(of: "`", with: "")
+
+        // 粗体 / 斜体 / 删除线
+        t = t.replacingOccurrences(of: "**", with: "")
+        t = t.replacingOccurrences(of: "__", with: "")
+        t = t.replacingOccurrences(of: "~~", with: "")
+
+        // 图片 ![alt](url) → alt
+        t = t.replacingOccurrences(of: #"!\[([^\]]*)\]\([^)]*\)"#,
+                                   with: "$1", options: .regularExpression)
+        // 链接 [text](url) → text
+        t = t.replacingOccurrences(of: #"\[([^\]]*)\]\([^)]*\)"#,
+                                   with: "$1", options: .regularExpression)
+
+        // 标题开头的 #
+        t = t.replacingOccurrences(of: #"(?m)^#{1,6}\s*"#,
+                                   with: "", options: .regularExpression)
+        // 引用开头的 >
+        t = t.replacingOccurrences(of: #"(?m)^\s*>\s?"#,
+                                   with: "", options: .regularExpression)
+        // 无序列表 → ·
+        t = t.replacingOccurrences(of: #"(?m)^\s*[-*+]\s+"#,
+                                   with: "· ", options: .regularExpression)
+
+        // 表格分隔行整行丢掉，数据行的 | 换成两空格
+        t = t.replacingOccurrences(of: #"(?m)^\s*\|?[\s:|-]+\|\s*$"#,
+                                   with: "", options: .regularExpression)
+        t = t.replacingOccurrences(of: #"\s*\|\s*"#,
+                                   with: "  ", options: .regularExpression)
+
+        // 压成单行：换行一律变空格，连续空格归一。
+        // 通知栏最多显示两三行，留换行只会让内容更早被截断。
+        t = t.replacingOccurrences(of: #"\s*\n+\s*"#, with: " ",
+                                   options: .regularExpression)
+        t = t.replacingOccurrences(of: #"\s{2,}"#, with: " ",
+                                   options: .regularExpression)
+        return t.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+
     private func push(id: String, title: String, body: String, sessionId: String) {
         let content = UNMutableNotificationContent()
-        content.title = "DSH · " + title
-        content.body = body
+        // 不要标题 —— 通知栏会出现「DSH · DSH」这种重复的第一行，
+        // 而且占掉本就有限的高度。正文里已经有全部信息。
+        content.title = ""
+        content.body = Self.plainText(from: body)
         content.categoryIdentifier = Self.categoryID
         content.sound = .default
         content.userInfo = ["sessionId": sessionId]
