@@ -23,6 +23,9 @@ final class MenuPanelController: NSObject {
 
     /// 气泡要锚定到哪个视图（由 AppDelegate 提供鲸鱼浮窗的 view）。
     var anchorViewProvider: (() -> NSView?)?
+
+    /// 弹出方向。桌宠在桌面右侧时朝左弹，状态栏图标则要朝下弹。
+    var preferredEdge: NSRectEdge = .minX
     private let stack = NSStackView()
     private var currentPage: Page = .main
 
@@ -138,6 +141,23 @@ final class MenuPanelController: NSObject {
     /// 贴着鲸鱼浮窗弹出。
     private func position() {
         guard let p = panel else { return }
+
+        // 有锚点就贴锚点：状态栏图标在顶栏 → 菜单朝下弹
+        if let anchor = anchorViewProvider?(), let host = anchor.window {
+            let inWindow = anchor.convert(anchor.bounds, to: nil)
+            let onScreen = host.convertToScreen(inWindow)
+            var x = onScreen.midX - p.frame.width / 2
+            var y = onScreen.minY - p.frame.height - 6
+            if let screen = host.screen ?? NSScreen.main {
+                let v = screen.visibleFrame
+                if y < v.minY + 8 { y = onScreen.maxY + 6 }   // 下方放不下就翻上去
+                x = min(max(x, v.minX + 8), v.maxX - p.frame.width - 8)
+            }
+            p.setFrameOrigin(NSPoint(x: x, y: y))
+            return
+        }
+
+        // 没有锚点：退回「贴桌宠」
         let whale = NSApp.windows.first { $0 is FloatWindow }
         guard let w = whale else { p.center(); return }
         let s = w.frame
@@ -186,6 +206,12 @@ final class MenuPanelController: NSObject {
 
         glass.contentView = container
         return glass
+    }
+
+    /// 就地重建当前页（设置项改动后调用，让勾/状态跟着变）。
+    func refreshCurrentPage() {
+        guard isVisible else { return }
+        rebuild()
     }
 
     func hide() {
@@ -523,6 +549,33 @@ final class MenuRowButton: NSView {
     override func mouseUp(with event: NSEvent) { onClick?() }
 }
 
+/// 数值输入框的回调包装：回车或失焦时提交。
+///
+/// 注意 popover 是 .transient 的 —— 焦点真离开时整个菜单会关，
+/// 所以对「结束编辑」的处理要宽容：能提交就提交，不依赖它一定被调用。
+@MainActor
+final class FieldBox: NSObject, NSTextFieldDelegate {
+    private let onCommit: (String) -> Void
+    private weak var field: NSTextField?
+
+    init(field: NSTextField, onCommit: @escaping (String) -> Void) {
+        self.field = field
+        self.onCommit = onCommit
+        super.init()
+        field.delegate = self
+        field.target = self
+        field.action = #selector(commit)
+    }
+
+    @objc private func commit() {
+        onCommit(field?.stringValue ?? "")
+    }
+
+    func controlTextDidEndEditing(_ obj: Notification) {
+        commit()
+    }
+}
+
 /// 包装 NSSlider 的回调（NSSlider 的 target/action 需要 selector，
 /// 用一个小对象接住，避免给每个滑块都写一个 @objc 方法）。
 @MainActor
@@ -560,4 +613,7 @@ final class ActionBox: NSObject {
         button.target = self
         button.action = #selector(fire(_:))
     }
-    @objc private func fire(_ b: NSButton) { onClick() }}
+    @objc private func fire(_ b: NSButton) { onClick() }
+
+    /// 供「整行可点」的手势识别器调用（那种场景没有 NSButton 参数）。
+    @objc func trigger() { onClick() }}

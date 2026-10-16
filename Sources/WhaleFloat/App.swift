@@ -33,6 +33,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         buildStatusItem()
 
+        // 菜单控制器在启动时就建好。
+        // 之前只在「右键浮窗」那条路径里懒加载，导致状态栏点图标时
+        // menuPanel 还是 nil，menuPanel?.toggle() 静默失败 —— 表现为点了没反应。
+        buildMenuPanel()
+
         // 素材就绪才创建浮窗 —— 否则开箱就是一只空白方块。
         // 缺素材时退化为「只有状态栏图标」的形态：
         // 余额、分析、设置这些照常可用，等用户导入角色图再启用桌宠。
@@ -113,7 +118,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         view.onDoubleClick = { [weak self] in
             self?.floatWindow?.whaleView.poke()
         }
-        view.onRightClick = { [weak self] event in self?.presentContextMenu(event) }
+        // 右键桌宠 = 左键桌宠 = 冒一下余额。
+        // 桌宠只管当宠物；菜单统一从状态栏图标进，两处不再各有一份。
+        view.onRightClick = { [weak self] _ in
+            self?.showBalanceBubble()
+        }
         win.onMoved = { [weak self] origin in
             self?.settings.position = origin
             self?.settings.save()
@@ -146,15 +155,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 双击 → 立即收起。
     private func hideBubble() {
         presenter.hideNow()
-    }
-
-    /// 在浮窗上右键：弹出**自绘的菜单面板**（全程序唯一的悬浮窗体）。
-    ///
-    /// 弃用 NSMenu 的原因：它放不下折线图，也没法让内容翻页
-    /// （「分析」「高级设置」要原地切到子页、再返回）。
-    private func presentContextMenu(_ event: NSEvent) {
-        if menuPanel == nil { buildMenuPanel() }
-        menuPanel?.toggle()
     }
 
     // MARK: - 菜单子页内容
@@ -287,45 +287,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 不再需要页首 spacer —— stack 自己的 top padding 已经提供留白，
         // 再加一个会让顶部变成 5+8=13，跟底部（5）不对称。
         var views: [NSView] = []
-        views.append(Self.settingsNote("角色大小", width: owner.currentContentWidth))
-        views.append(Self.sliderRow(value: settings.characterSize, min: 120, max: 360, width: owner.currentContentWidth) { [weak self] v in
-            guard let self else { return }
-            self.settings.characterSize = v
-            self.settings.save()
-            self.floatWindow?.applySize(v)
+        // 每行一个选项，右侧打勾 —— 系统菜单的规范样式。
+        // 两档固定值，不做连续调节：既避免半像素缩放，也省掉一个控件。
+        views.append(Self.choiceRow("角色大小（100%）", selected: settings.characterSize == Self.sizeLarge,
+                                    width: owner.currentContentWidth) { [weak self] in
+            self?.applyCharacterSize(Self.sizeLarge)
         })
-        views.append(Self.settingsNote("气泡停留（秒）", width: owner.currentContentWidth))
-        views.append(Self.sliderRow(value: settings.bubbleSeconds, min: 2, max: 30, width: owner.currentContentWidth) { [weak self] v in
-            guard let self else { return }
-            self.settings.bubbleSeconds = v
-            self.settings.save()
-            self.presenter.autoHideSeconds = v
+        views.append(Self.choiceRow("角色大小（50%）", selected: settings.characterSize != Self.sizeLarge,
+                                    width: owner.currentContentWidth) { [weak self] in
+            self?.applyCharacterSize(Self.sizeSmall)
         })
-        views.append(Self.toggleRow("气泡内显示峰谷字", settings.showValley, width: owner.currentContentWidth) { [weak self] on in
+        views.append(Self.choiceRow("气泡停留（10s）", selected: settings.bubbleSeconds >= 7,
+                                    width: owner.currentContentWidth) { [weak self] in
+            self?.applyBubbleSeconds(10)
+        })
+        views.append(Self.choiceRow("气泡停留（5s）", selected: settings.bubbleSeconds < 7,
+                                    width: owner.currentContentWidth) { [weak self] in
+            self?.applyBubbleSeconds(4)
+        })
+        views.append(Self.toggleRow2("气泡内显示峰谷字", settings.showValley, width: owner.currentContentWidth) { [weak self] on in
             guard let self else { return }
             self.settings.showValley = on
             self.settings.save()
             self.floatWindow?.whaleView.showsValley = on
             self.floatWindow?.whaleView.needsLayout = true
+            self.menuPanel?.refreshCurrentPage()
         })
-        views.append(Self.toggleRow("气泡内显示时间", settings.showClock, width: owner.currentContentWidth) { [weak self] on in
+        views.append(Self.toggleRow2("气泡内显示时间", settings.showClock, width: owner.currentContentWidth) { [weak self] on in
             guard let self else { return }
             self.settings.showClock = on
             self.settings.save()
             self.floatWindow?.whaleView.showsClock = on
+            self.menuPanel?.refreshCurrentPage()
             self.floatWindow?.whaleView.needsLayout = true
         })
-        views.append(Self.toggleRow("启用事件音效", settings.soundOn, width: owner.currentContentWidth) { [weak self] on in
+        views.append(Self.toggleRow2("启用事件音效", settings.soundOn, width: owner.currentContentWidth) { [weak self] on in
             guard let self else { return }
             self.settings.soundOn = on
             self.settings.save()
             self.floatWindow?.whaleView.setSoundEnabled(on)
+            self.menuPanel?.refreshCurrentPage()
         })
-        views.append(Self.toggleRow("拖到边缘时吸附", settings.snapEnabled, width: owner.currentContentWidth) { [weak self] on in
+        views.append(Self.toggleRow2("拖到边缘时吸附", settings.snapEnabled, width: owner.currentContentWidth) { [weak self] on in
             guard let self else { return }
             self.settings.snapEnabled = on
             self.settings.save()
             self.floatWindow?.snapEnabled = on
+            self.menuPanel?.refreshCurrentPage()
         })
         views.append(Self.settingsButton("导入角色图片…", width: owner.currentContentWidth) { [weak self] in
             self?.importCharacter()
@@ -339,6 +347,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - 设置页的小组件
 
     /// 设置页里每一行的统一高度 —— 行高一致，间距才看起来均匀。
+    /// 角色尺寸的两档。
+    ///
+    /// 按原图 610×610 取整数比 2:1：
+    ///   大 304pt → Retina 下 608px，接近 1:1 像素映射，最清晰
+    ///   小 152pt → 304px，正好是原图的一半，重采样干净
+    /// 都取整，避免半像素造成的模糊。
+    static let sizeLarge: CGFloat = 304
+    static let sizeSmall: CGFloat = 152
+
     private static let rowHeight: CGFloat = 20
 
     /// 行与行之间的**唯一**间距来源。
@@ -363,40 +380,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return row
     }
 
-    private static func sliderRow(value: Double, min lo: Double, max hi: Double,
-                                  width: CGFloat,
-                                  onChange: @escaping (Double) -> Void) -> NSView {
-        let slider = NSSlider(value: value, minValue: lo, maxValue: hi,
-                              target: nil, action: nil)
-        slider.isContinuous = true
-        slider.translatesAutoresizingMaskIntoConstraints = false
-        slider.widthAnchor.constraint(equalToConstant: max(60, width - 28)).isActive = true
-        slider.heightAnchor.constraint(equalToConstant: Self.rowHeight).isActive = true
-        let box = SliderBox(slider: slider, onChange: onChange)
-        objc_setAssociatedObject(slider, "whalefloat.sliderbox", box, .OBJC_ASSOCIATION_RETAIN)
-        let row = NSStackView(views: [slider])
-        // 滑块：下方统一留 8，与下个组分开
-        row.edgeInsets = NSEdgeInsets(top: 0, left: 14, bottom: Self.rowGap, right: 14)
-        row.translatesAutoresizingMaskIntoConstraints = false
-        row.widthAnchor.constraint(equalToConstant: width).isActive = true
-        return row
+    /// 一行一个选项：左边文字，右边在选中时打个勾。
+    ///
+    /// 取代了「标签 + 滑块」的两行结构：两行时为了让标签贴住控件，
+    /// 必须再造一种更小的间距，页面上就有两种节奏。现在每行即一个语义单元，
+    /// 全页一种间距。
+    /// 二选一中的一行。
+    private static func choiceRow(_ title: String, selected: Bool, width: CGFloat,
+                                  onSelect: @escaping () -> Void) -> NSView {
+        checkRow(title, checked: selected, width: width, onToggle: onSelect)
     }
 
-    private static func toggleRow(_ title: String, _ on: Bool, width: CGFloat,
-                                  onChange: @escaping (Bool) -> Void) -> NSView {
-        let btn = NSButton(checkboxWithTitle: title, target: nil, action: nil)
-        btn.state = on ? .on : .off
-        btn.font = .systemFont(ofSize: MenuPanelController.subFontSize)
-        // 固定行高 —— 复选框的自然高度比滑块矮，不固定的话每行高矮不一，
-        // 相同的间距看起来也会不匀。
-        btn.heightAnchor.constraint(equalToConstant: Self.rowHeight).isActive = true
-        let box = ToggleBox(button: btn, onChange: onChange)
-        objc_setAssociatedObject(btn, "whalefloat.togglebox", box, .OBJC_ASSOCIATION_RETAIN)
-        let row = NSStackView(views: [btn])
-        // 复选框 / 按钮行：同样只靠 bottom 控制
+    /// 开关行 —— 与二选一**同构**（左文字、右打勾），点一下翻转。
+    ///
+    /// 之前这里用的是系统 NSButton(checkboxWithTitle:)，勾在**左**边，
+    /// 而二选一的勾在右边，同一页出现两种样式。现在统一走 checkRow。
+    private static func toggleRow2(_ title: String, _ on: Bool, width: CGFloat,
+                                   onChange: @escaping (Bool) -> Void) -> NSView {
+        checkRow(title, checked: on, width: width) { onChange(!on) }
+    }
+
+    /// 二选一行 —— 语义上「同组内只有一个选中」，实现与开关相同。
+    private static func checkRow(_ title: String, checked: Bool,
+                                 width: CGFloat,
+                                 onToggle: @escaping () -> Void) -> NSView {
+        let label = NSTextField(labelWithString: title)
+        label.font = .systemFont(ofSize: MenuPanelController.subFontSize)
+        label.textColor = .labelColor
+
+        let check = NSTextField(labelWithString: checked ? "✓" : "")
+        check.font = .systemFont(ofSize: MenuPanelController.subFontSize, weight: .medium)
+        check.textColor = checked ? .controlAccentColor : .clear
+        check.alignment = .right
+        check.translatesAutoresizingMaskIntoConstraints = false
+        check.widthAnchor.constraint(equalToConstant: 16).isActive = true
+
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        let row = NSStackView(views: [label, spacer, check])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.heightAnchor.constraint(equalToConstant: Self.rowHeight).isActive = true
         row.edgeInsets = NSEdgeInsets(top: 0, left: 14, bottom: Self.rowGap, right: 14)
         row.translatesAutoresizingMaskIntoConstraints = false
         row.widthAnchor.constraint(equalToConstant: width).isActive = true
+
+        // 整行可点
+        let box = ActionBox(button: NSButton()) { onToggle() }
+        objc_setAssociatedObject(row, "whalefloat.checkrow", box, .OBJC_ASSOCIATION_RETAIN)
+        row.addGestureRecognizer(
+            NSClickGestureRecognizer(target: box, action: #selector(ActionBox.trigger)))
         return row
     }
 
@@ -432,7 +466,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ("安装配套插件…", false, { [weak self] in self?.menuPanel?.hide(); self?.installPlugins() }, "⌥5"),
             ("充值 / 查看用量…", false, { [weak self] in self?.menuPanel?.hide(); self?.openBilling() }, "⌥6"),
             ("-", false, {}, nil),
-            ("完全退出（并关闭 DSH）", false, { [weak self] in self?.quitEverything() }, "⌥7"),
+            ("退出 DSH", false, { [weak self] in self?.quitEverything() }, "⌥7"),
             ("退出浮窗", false, { [weak self] in self?.quit() }, "⌥8"),
         ]
         // 气泡锚定到鲸鱼浮窗的视图上（NSPopover 需要锚点）
@@ -470,6 +504,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// 导入自定义角色图片：选图 → 复制到 assets 目录 → 切换角色。
+    /// 应用角色尺寸档位。
+    ///
+    /// 必须 refreshMenu —— 档位是「选中项打勾」表达的，
+    /// 值改了但面板不重建，勾就还停在原来那一行。
+    private func applyCharacterSize(_ v: CGFloat) {
+        settings.characterSize = v
+        settings.save()
+        floatWindow?.applySize(v)
+        menuPanel?.refreshCurrentPage()
+    }
+
+    /// 应用气泡停留档位。同样要重建面板（理由同上）。
+    private func applyBubbleSeconds(_ v: Double) {
+        settings.bubbleSeconds = v
+        settings.save()
+        presenter.autoHideSeconds = v
+        menuPanel?.refreshCurrentPage()
+    }
+
     /// 「获取角色素材…」—— 只指路，不代劳。
     ///
     /// 素材版权属于上游（其 PROVENANCE 写明「仅用于运行本插件」），
@@ -584,8 +637,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             accessibilityDescription: "WhaleFloat"
         )
         item.button?.image?.isTemplate = true
-        item.menu = MenuBuilder.build(target: self)
+        item.button?.target = self
+        item.button?.action = #selector(statusItemClicked(_:))
+        // 左右键都唤起同一个自绘菜单。
+        // 不用 item.menu（那是系统 NSMenu，外观与自绘面板对不上，
+        // 而且内容还少几项）。
+        item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         statusItem = item
+    }
+
+    /// 状态栏图标被点 —— 唤起自绘菜单。
+    @objc func statusItemClicked(_ sender: NSStatusBarButton) {
+        if menuPanel == nil { buildMenuPanel() }
+        menuPanel?.anchorViewProvider = { sender }
+        menuPanel?.preferredEdge = .maxY      // 图标在顶栏，菜单朝下弹
+        menuPanel?.toggle()
     }
 
     /// 供菜单项调用的动作集合。
