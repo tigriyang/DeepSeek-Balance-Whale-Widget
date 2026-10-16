@@ -36,7 +36,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 素材就绪才创建浮窗 —— 否则开箱就是一只空白方块。
         // 缺素材时退化为「只有状态栏图标」的形态：
         // 余额、分析、设置这些照常可用，等用户导入角色图再启用桌宠。
-        CharacterAssets.debugDump()
         if CharacterAssets.isReady {
             buildFloatWindow()
         } else {
@@ -95,21 +94,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// 角色素材是否就绪（决定开箱是「桌宠」还是「仅状态栏」）。
     enum CharacterAssets {
-        /// 把查找过程落到文件里 —— NSLog 走系统日志，读起来麻烦。
-        static func debugDump() {
-            var out = "isReady=\(isReady)\n"
-            out += "defaultRoleFile=\(WhaleView.defaultRoleFile)\n"
-            out += "resourcePath=\(Bundle.main.resourcePath ?? "nil")\n"
-            for name in [WhaleView.defaultRoleFile, "custom.png"] {
-                out += "\(name):\n"
-                for p in AssetPaths.candidates(for: name) {
-                    let ok = FileManager.default.fileExists(atPath: p)
-                    out += "   [\(ok ? "有" : "无")] \(p)\n"
-                }
-            }
-            try? out.write(toFile: "/tmp/whalefloat-assets.log", atomically: true, encoding: .utf8)
-        }
-
         static var isReady: Bool {
             let names = [WhaleView.defaultRoleFile, "custom.png"]
             let fm = FileManager.default
@@ -152,23 +136,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 气泡默认不显示 —— 只有轮次结束或点击才冒出来
         view.setBubbleVisible(false, animated: false)
         win.orderFrontRegardless()
-
-        // 自检：确认窗口真的出来了（外部工具查窗口要屏幕录制权限，这机器上没有）
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            guard let self else { return }
-            let w = self.floatWindow
-            let info = """
-            浮窗自检:
-              exists=\(w != nil)
-              visible=\(w?.isVisible ?? false)
-              frame=\(w?.frame ?? .zero)
-              screen=\(NSScreen.main?.visibleFrame ?? .zero)
-              onActiveSpace=\(w?.isOnActiveSpace ?? false)
-              alpha=\(w?.alphaValue ?? -1)
-            """
-            let prev = (try? String(contentsOfFile: "/tmp/whalefloat-assets.log", encoding: .utf8)) ?? ""
-            try? (prev + "\n" + info).write(toFile: "/tmp/whalefloat-assets.log", atomically: true, encoding: .utf8)
-        }
     }
 
     /// 单击鲸鱼 → 冒泡显示余额（10 秒后自动消失）。
@@ -363,6 +330,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         views.append(Self.settingsButton("导入角色图片…", width: owner.currentContentWidth) { [weak self] in
             self?.importCharacter()
         })
+        views.append(Self.settingsButton("获取角色素材…", width: owner.currentContentWidth) { [weak self] in
+            self?.openAssetSource()
+        })
         return views
     }
 
@@ -498,6 +468,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// 导入自定义角色图片：选图 → 复制到 assets 目录 → 切换角色。
+    /// 「获取角色素材…」—— 只指路，不代劳。
+    ///
+    /// 素材版权属于上游（其 PROVENANCE 写明「仅用于运行本插件」），
+    /// 所以这里不代下载，只做两件事：
+    ///   1. 打开本机的素材文件夹（用户放进去即生效）
+    ///   2. 在浏览器打开上游素材页
+    /// 取用是用户自己的动作。
+    @objc func openAssetSource() {
+        // 素材目录可能还不存在，先建出来，否则 Finder 打开会失败
+        try? FileManager.default.createDirectory(at: Settings.assetsDir,
+                                                 withIntermediateDirectories: true)
+        NSWorkspace.shared.open(Settings.assetsDir)
+        if let url = URL(string: Settings.assetSourceURL) {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     @objc func importCharacter() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false

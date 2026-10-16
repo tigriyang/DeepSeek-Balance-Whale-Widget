@@ -246,6 +246,12 @@ struct Settings: Codable {
     }()
 
     /// 导入的自定义角色图片存放目录。
+    /// 素材的上游位置 —— 供「获取角色素材…」在浏览器打开。
+    /// 选择让用户自己去取，而不是程序代下载：上游对该目录的授权是
+    /// 「仅用于运行本插件」，程序代取会越过那条线。
+    static let assetSourceURL =
+        "https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget/tree/HEAD/assets"
+
     static let assetsDir: URL = {
         let home = FileManager.default.homeDirectoryForCurrentUser
         return home.appendingPathComponent(".dsh/whalefloat-assets", isDirectory: true)
