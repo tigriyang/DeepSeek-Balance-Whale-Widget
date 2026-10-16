@@ -272,22 +272,6 @@ struct Settings: Codable {
     }
 }
 
-/// CGPoint 默认不是 Codable（CoreGraphics 没提供），这里显式实现，
-/// 存成 {"x":..,"y":..} 便于人读与手改。
-extension CGPoint: @retroactive Codable {
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.init(
-            x: try c.decode(CGFloat.self, forKey: .x),
-            y: try c.decode(CGFloat.self, forKey: .y)
-        )
-    }
+// CGPoint 的 Codable 由 CoreGraphics 自带，格式同为 {x, y}。
+// 不需要自己实现 —— 自己写会和它的 conformance 撞车，编译器会警告。
 
-    public func encode(to encoder: Encoder) throws {
-        var c = encoder.container(keyedBy: CodingKeys.self)
-        try c.encode(x, forKey: .x)
-        try c.encode(y, forKey: .y)
-    }
-
-    enum CodingKeys: String, CodingKey { case x, y }
-}

@@ -56,6 +56,10 @@ enum MenuBuilder {
         m.addItem(.separator())
         add(m, "退出浮窗", #selector(AppDelegate.quit), target)
         add(m, "退出 DSH", #selector(AppDelegate.quitEverything), target)
+        m.addItem(.separator())
+        // 卸载入口：清自启 + 摘插件 + 本体进废纸篓。
+        // 拖进废纸篓也能删掉本体，但 launchd 配置和 DSH 插件会留下。
+        add(m, "卸载 WhaleFloat…", #selector(AppDelegate.uninstallSelf), target)
         return m
     }
 
@@ -80,7 +84,7 @@ enum AppInfo {
     /// 次要文字的字号（菜单、面板里的说明与数值统一用它）。
     static let subFontSize: CGFloat = 12
 
-    static let version = "0.1.2"
+    static let version = "0.1.3"
 }
 
 /// 外部链接。
