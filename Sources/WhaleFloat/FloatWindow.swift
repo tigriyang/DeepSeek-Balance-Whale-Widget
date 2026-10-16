@@ -257,6 +257,35 @@ struct Settings: Codable {
         return home.appendingPathComponent(".dsh/whalefloat-assets", isDirectory: true)
     }()
 
+    /// 宽容解码：**每个字段缺失都退回默认值**，而不是让整份配置解不出来。
+    ///
+    /// Swift 自动合成的解码器要求所有字段都在 —— 哪怕属性写了默认值。
+    /// 那样一来，将来新增一个字段，老配置文件就会整体解码失败，
+    /// 用户的全部设置被重置成出厂状态。这里逐个字段给兜底。
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        func get<T: Decodable>(_ key: CodingKeys, _ fallback: T) -> T {
+            (try? c.decode(T.self, forKey: key)) ?? fallback
+        }
+        characterSize = get(.characterSize, 220)
+        characterName = get(.characterName, "DSniang02")
+        position = try? c.decodeIfPresent(CGPoint.self, forKey: .position)
+        bubbleSeconds = get(.bubbleSeconds, 10)
+        bubbleOn = get(.bubbleOn, true)
+        pressBubble = get(.pressBubble, false)
+        turnCostBubble = get(.turnCostBubble, true)
+        showValley = get(.showValley, true)
+        showClock = get(.showClock, true)
+        snapEnabled = get(.snapEnabled, true)
+        snapMargin = get(.snapMargin, 20)
+        lowBalanceWarn = get(.lowBalanceWarn, 0)
+        dailyBudget = get(.dailyBudget, 0)
+        soundOn = get(.soundOn, true)
+        soundVolume = get(.soundVolume, 0.9)
+    }
+
     static func load() -> Settings {
         guard let data = try? Data(contentsOf: fileURL),
               let s = try? JSONDecoder().decode(Settings.self, from: data)
@@ -268,10 +297,14 @@ struct Settings: Codable {
         let enc = JSONEncoder()
         enc.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? enc.encode(self) else { return }
-        try? data.write(to: Self.fileURL, options: .atomic)
+        do {
+            try data.write(to: Self.fileURL, options: .atomic)
+        } catch {
+            // 写失败不该静默 —— 至少留个痕，否则用户会以为设置生效了
+            NSLog("WhaleFloat: 设置写入失败 \(error.localizedDescription)")
+        }
     }
 }
 
 // CGPoint 的 Codable 由 CoreGraphics 自带，格式同为 {x, y}。
 // 不需要自己实现 —— 自己写会和它的 conformance 撞车，编译器会警告。
-

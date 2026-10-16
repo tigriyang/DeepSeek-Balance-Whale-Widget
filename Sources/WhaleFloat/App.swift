@@ -142,8 +142,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 菜单即将展开 —— 用最新的设置重建一次，勾选才是对的。
     func menuNeedsUpdate(_ menu: NSMenu) {
         let fresh = MenuBuilder.build(target: self)
+        // 先把项目取出来再搬运。
+        // 直接 for item in fresh.items 里调 fresh.removeItem 是边遍历边改数组 ——
+        // 数组缩短会让索引错位，结果是菜单项丢几个。
+        let items = Array(fresh.items)
         menu.removeAllItems()
-        for item in fresh.items {
+        for item in items {
             fresh.removeItem(item)
             menu.addItem(item)
         }
@@ -165,9 +169,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             changed = true
         }
         if changed {
-            settings.save()
             NSLog("WhaleFloat: 设置已规范到合法档位（气泡 \(settings.bubbleSeconds)s，尺寸 \(Int(settings.characterSize))）")
         }
+        // 无论有没有改动都写回一次：解码是宽容的，缺字段会取默认值，
+        // 但那只是内存里的值 —— 落盘一次，文件才是完整且与生效值一致的。
+        settings.save()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
