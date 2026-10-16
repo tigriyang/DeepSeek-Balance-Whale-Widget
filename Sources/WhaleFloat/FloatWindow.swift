@@ -84,6 +84,9 @@ final class FloatWindow: NSPanel {
     }
 
     @objc private func handleMove() {
+        // 拖完就把窗口拉回可见区域 —— 否则能被拖到屏幕外，
+        // 表现为「贴着边只剩半边」。
+        clampToVisibleScreen()
         onMoved?(frame.origin)
         scheduleSnap()
     }
@@ -108,6 +111,48 @@ final class FloatWindow: NSPanel {
         }
         RunLoop.main.add(t, forMode: .common)
         snapTimer = t
+    }
+
+    /// 允许的坐标范围（可见区域内，完整放下窗口）。
+    private func clampedOrigin(_ p: NSPoint) -> NSPoint {
+        guard let screen = (self.screen ?? NSScreen.main) else { return p }
+        let v = screen.visibleFrame
+        let maxX = max(v.minX, v.maxX - frame.width)
+        let maxY = max(v.minY, v.maxY - frame.height)
+        return NSPoint(x: min(max(p.x, v.minX), maxX),
+                       y: min(max(p.y, v.minY), maxY))
+    }
+
+    /// 从源头夹住 —— 比事后监听 didMove 可靠。
+    ///
+    /// performDrag 期间 didMove 通知不一定按每帧到达，所以之前
+    /// 「拖到屏幕外只剩半边」的问题在拖动过程中一直存在。
+    /// 重写这两个方法后，无论拖动、吸附动画还是恢复位置，都出不去。
+    override func setFrameOrigin(_ point: NSPoint) {
+        super.setFrameOrigin(clampedOrigin(point))
+    }
+
+    override func setFrame(_ frameRect: NSRect, display flag: Bool) {
+        var r = frameRect
+        r.origin = clampedOrigin(r.origin)
+        super.setFrame(r, display: flag)
+    }
+
+    /// 把窗口约束在屏幕的可见区域内（完整可见，不留半截在外面）。
+    ///
+    /// 只在**不吸附**时用「完整可见」；吸附时留的那点 snapMargin 是刻意的。
+    private func clampToVisibleScreen() {
+        guard let screen = (self.screen ?? NSScreen.main) else { return }
+        let v = screen.visibleFrame
+        var f = frame
+        // 窗口比可见区域还大时不硬夹（夹了会抖），直接把原点对齐左上
+        let maxX = max(v.minX, v.maxX - f.width)
+        let maxY = max(v.minY, v.maxY - f.height)
+        f.origin.x = min(max(f.origin.x, v.minX), maxX)
+        f.origin.y = min(max(f.origin.y, v.minY), maxY)
+        if abs(f.origin.x - frame.origin.x) > 0.5 || abs(f.origin.y - frame.origin.y) > 0.5 {
+            setFrameOrigin(f.origin)
+        }
     }
 
     private func snapToNearestEdge() {

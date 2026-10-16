@@ -32,7 +32,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         buildStatusItem()
-        buildFloatWindow()
+
+        // 素材就绪才创建浮窗 —— 否则开箱就是一只空白方块。
+        // 缺素材时退化为「只有状态栏图标」的形态：
+        // 余额、分析、设置这些照常可用，等用户导入角色图再启用桌宠。
+        CharacterAssets.debugDump()
+        if CharacterAssets.isReady {
+            buildFloatWindow()
+        } else {
+            NSLog("WhaleFloat: 未找到角色素材，以「仅状态栏」模式启动")
+        }
         startRefreshLoop()
 
         // 对话输出 → 系统通知（带回复框）。首次会弹一次系统授权对话框。
@@ -84,6 +93,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - 浮窗
 
+    /// 角色素材是否就绪（决定开箱是「桌宠」还是「仅状态栏」）。
+    enum CharacterAssets {
+        /// 把查找过程落到文件里 —— NSLog 走系统日志，读起来麻烦。
+        static func debugDump() {
+            var out = "isReady=\(isReady)\n"
+            out += "defaultRoleFile=\(WhaleView.defaultRoleFile)\n"
+            out += "resourcePath=\(Bundle.main.resourcePath ?? "nil")\n"
+            for name in [WhaleView.defaultRoleFile, "custom.png"] {
+                out += "\(name):\n"
+                for p in AssetPaths.candidates(for: name) {
+                    let ok = FileManager.default.fileExists(atPath: p)
+                    out += "   [\(ok ? "有" : "无")] \(p)\n"
+                }
+            }
+            try? out.write(toFile: "/tmp/whalefloat-assets.log", atomically: true, encoding: .utf8)
+        }
+
+        static var isReady: Bool {
+            let names = [WhaleView.defaultRoleFile, "custom.png"]
+            let fm = FileManager.default
+            return names.contains { name in
+                AssetPaths.candidates(for: name).contains { fm.fileExists(atPath: $0) }
+            }
+        }
+    }
+
     private func buildFloatWindow() {
         let size = settings.characterSize
         let win = FloatWindow(size: size)
@@ -117,6 +152,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 气泡默认不显示 —— 只有轮次结束或点击才冒出来
         view.setBubbleVisible(false, animated: false)
         win.orderFrontRegardless()
+
+        // 自检：确认窗口真的出来了（外部工具查窗口要屏幕录制权限，这机器上没有）
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self else { return }
+            let w = self.floatWindow
+            let info = """
+            浮窗自检:
+              exists=\(w != nil)
+              visible=\(w?.isVisible ?? false)
+              frame=\(w?.frame ?? .zero)
+              screen=\(NSScreen.main?.visibleFrame ?? .zero)
+              onActiveSpace=\(w?.isOnActiveSpace ?? false)
+              alpha=\(w?.alphaValue ?? -1)
+            """
+            let prev = (try? String(contentsOfFile: "/tmp/whalefloat-assets.log", encoding: .utf8)) ?? ""
+            try? (prev + "\n" + info).write(toFile: "/tmp/whalefloat-assets.log", atomically: true, encoding: .utf8)
+        }
     }
 
     /// 单击鲸鱼 → 冒泡显示余额（10 秒后自动消失）。
@@ -471,7 +523,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         settings.characterName = "custom"
         settings.save()
-        floatWindow?.whaleView.reloadImages(characterName: "custom")
+
+        // 之前如果是「仅状态栏」模式，这时才把桌宠启用起来
+        if floatWindow == nil {
+            buildFloatWindow()
+        } else {
+            floatWindow?.whaleView.reloadImages(characterName: "custom")
+        }
     }
 
     /// 设置变化后应用。
@@ -547,11 +605,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func toggleFloat() {
-        guard let win = floatWindow else { return }
-        if win.isVisible {
-            win.orderOut(nil)
-        } else {
-            win.orderFrontRegardless()
+        if let win = floatWindow {
+            if win.isVisible {
+                win.orderOut(nil)
+            } else {
+                win.orderFrontRegardless()
+            }
+            return
+        }
+        // 浮窗还没建（启动时缺素材）—— 素材到位了就地补建
+        if CharacterAssets.isReady {
+            buildFloatWindow()
         }
     }
 

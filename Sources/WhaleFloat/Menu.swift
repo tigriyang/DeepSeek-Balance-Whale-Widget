@@ -20,6 +20,10 @@ enum MenuBuilder {
         add(m, "刷新余额", #selector(AppDelegate.refreshNow), target)
         m.addItem(.separator())
         add(m, "分析…", #selector(AppDelegate.openLedger), target)
+        // 缺素材时程序是「仅状态栏」形态，必须留一条自救路径，
+        // 否则用户无从启用桌宠。
+        add(m, "导入角色图片…", #selector(AppDelegate.importCharacter), target)
+        add(m, "显示 / 隐藏桌宠", #selector(AppDelegate.toggleFloat), target)
         add(m, "启动 DSH GUI", #selector(AppDelegate.launchDSH), target)
         add(m, "充值 / 查看用量…", #selector(AppDelegate.openBilling), target)
         m.addItem(.separator())
