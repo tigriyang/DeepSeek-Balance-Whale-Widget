@@ -52,16 +52,19 @@ if [ -f "$LAUNCHER_SRC" ]; then
 fi
 
 # 内置「中介」插件 —— 它们挂在 DSH 上采集事件，本程序读文件。
-# 随包发布，首次运行时由程序引导安装到 ~/.dsh/plugins/。
+#
+# 源从**项目目录**取，不是从 ~/.dsh/plugins/。
+# 后者是安装目标：卸载脚本会把它清掉，从那里读会导致
+# 「卸过一次之后，再构建出来的包里就没有插件了」。
 mkdir -p "$DEST/Contents/Resources/plugins"
-for p in dsh-wait-state dsh-turn-usage; do
-  SRC_PLUGIN="$HOME/.dsh/plugins/$p"
+for p in dsh-wait-state dsh-turn-usage dsh-notify-bridge; do
+  SRC_PLUGIN="$HERE/plugins/$p"
   if [ -d "$SRC_PLUGIN" ]; then
     rm -rf "$DEST/Contents/Resources/plugins/$p"
     cp -R "$SRC_PLUGIN" "$DEST/Contents/Resources/plugins/$p"
     echo "  内置插件：$p"
   else
-    echo "  ⚠ 未找到插件 $SRC_PLUGIN"
+    echo "  ⚠ 项目里缺少插件源码：$SRC_PLUGIN"
   fi
 done
 

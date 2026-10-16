@@ -13,12 +13,13 @@ import Foundation
 @MainActor
 enum PluginInstaller {
     /// 随包发布的中介插件（目录名）。
-    static let bundled = ["dsh-wait-state", "dsh-turn-usage"]
+    static let bundled = ["dsh-wait-state", "dsh-turn-usage", "dsh-notify-bridge"]
 
     /// 插件的人类可读说明（用于安装提示）。
     static let descriptions: [String: String] = [
         "dsh-wait-state": "等用户回答 / 授权时，让浮窗冒泡提示",
         "dsh-turn-usage": "采集每轮对话消耗，供浮窗显示¥金额",
+        "dsh-notify-bridge": "把对话输出推送到系统通知，并支持在通知里直接回复",
     ]
 
     static var pluginsDir: URL {
@@ -133,32 +134,50 @@ enum PluginInstaller {
         return (["⚠ 注册了 \(ok)/\(names.count) 个"] + log).joined(separator: "\n")
     }
 
-    /// 首次运行引导：缺插件时弹窗，用户确认后安装。
-    /// 已经装齐则静默返回。
-    static func promptIfNeeded() {
+    /// 用户主动点菜单时的安装 —— 这条路径可以弹框，
+    /// 因为是他自己点的，反馈是必要的。
+    /// （启动时的自动补齐走 installMissingQuietly，不弹框。）
+    static func installWithFeedback() {
         let missing = self.missing()
-        guard !missing.isEmpty else { return }
-
         let alert = NSAlert()
-        alert.messageText = "还差 \(missing.count) 个配套插件"
-        let list = missing.map { "  · \($0) —— \(descriptions[$0] ?? "")" }.joined(separator: "\n")
-        alert.informativeText = """
-            小鲸鱼需要两个小插件挂在 DSH 上，才能知道「有人正在等你回答」
-            以及「这一轮花了多少钱」。它们会装到 ~/.dsh/plugins/。
+        if missing.isEmpty {
+            alert.messageText = "配套插件都齐了"
+            alert.informativeText = bundled
+                .map { "  · \($0) —— \(descriptions[$0] ?? "")" }
+                .joined(separator: "\n")
+            alert.addButton(withTitle: "好")
+        } else {
+            alert.messageText = "安装 \(missing.count) 个配套插件"
+            alert.informativeText = missing
+                .map { "  · \($0) —— \(descriptions[$0] ?? "")" }
+                .joined(separator: "\n")
+            + "\n\n装到 ~/.dsh/plugins/，装完需要重启一次 DSH。"
+            alert.addButton(withTitle: "安装")
+            alert.addButton(withTitle: "取消")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            let result = install(missing)
+            let done = NSAlert()
+            done.messageText = "安装结果"
+            done.informativeText = result
+            done.addButton(withTitle: "好")
+            done.runModal()
+            return
+        }
+        alert.runModal()
+    }
 
-            \(list)
-
-            装完需要重启一次 DSH。
-            """
-        alert.addButton(withTitle: "安装")
-        alert.addButton(withTitle: "稍后")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-
+    /// 启动时补齐缺失的插件。
+    ///
+    /// **不弹模态框**。之前这里是 runModal()，会阻塞主线程 ——
+    /// 自动化流程（或任何后台操作）碰上它就停住了。
+    /// 插件本来就随包发布，直接装上即可，没什么可问的。
+    /// 结果记进日志，菜单里也能看到状态。
+    @discardableResult
+    static func installMissingQuietly() -> String? {
+        let missing = self.missing()
+        guard !missing.isEmpty else { return nil }
         let result = install(missing)
-        let done = NSAlert()
-        done.messageText = "插件安装结果"
-        done.informativeText = result
-        done.addButton(withTitle: "好")
-        done.runModal()
+        NSLog("WhaleFloat: 自动安装插件 → \(result)")
+        return result
     }
 }

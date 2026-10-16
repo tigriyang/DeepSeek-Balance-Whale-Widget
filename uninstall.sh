@@ -22,7 +22,9 @@ KEEP=0
 [ "${1:-}" = "--keep-data" ] && KEEP=1
 
 H="$HOME"
-APP="$H/Applications/${APP_NAME}.app"
+# 两个位置都要看：从 DMG 装的在 /Applications，开发时装在 ~/Applications。
+# 只清后者会导致「DMG 装的用户执行卸载，脚本找不到应用」。
+APP_CANDIDATES=("/Applications/${APP_NAME}.app" "$H/Applications/${APP_NAME}.app")
 PLIST="$H/Library/LaunchAgents/${LABEL}.plist"
 
 say() { printf "%s\n" "$*"; }
@@ -40,7 +42,9 @@ done
 removed "$PLIST" "自启配置"
 
 say "▸ 删除应用本体…"
-removed "$APP" "应用"
+for a in "${APP_CANDIDATES[@]}"; do
+  removed "$a" "应用"
+done
 
 say "▸ 摘除并删除 DSH 插件…"
 DSH=""

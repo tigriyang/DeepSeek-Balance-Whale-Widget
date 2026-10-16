@@ -55,10 +55,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 这样安装只需一步（拖拽），不用再跑 install.sh。
         installLaunchAgentIfNeeded()
 
-        // 首次运行引导：缺「中介」插件时提示安装。
-        // 延后一拍，等浮窗先显示出来 —— 否则弹窗会盖在还没画完的界面上。
+        // 补齐缺失的配套插件 —— 静默进行，不弹框。
+        // 插件随包发布，装上就好；弹模态框会阻塞主线程，
+        // 自动化流程碰上它就卡住了。
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            PluginInstaller.promptIfNeeded()
+            PluginInstaller.installMissingQuietly()
         }
     }
 
@@ -491,7 +492,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             alert.runModal()
             return
         }
-        PluginInstaller.promptIfNeeded()
+        PluginInstaller.installWithFeedback()
     }
 
     /// 菜单「记账明细…」。

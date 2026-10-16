@@ -1,0 +1,4 @@
+# dsh-wait-state bundle patch
+- insert:
+    - id: wait-state
+      name: 'dsh-wait-state'
