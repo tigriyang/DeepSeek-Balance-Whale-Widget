@@ -33,7 +33,10 @@ final class NotifyBridge: NSObject, UNUserNotificationCenterDelegate {
     }
 
     /// 诊断输出（NSLog 走系统日志，这里额外落个文件方便排查）。
-    static func trace(_ msg: String) {
+    /// 诊断输出。nonisolated —— 调用它的地方多在 URLSession 回调里，
+    /// 那些不是主线程，标成 MainActor 会触发隔离违规。
+    /// 它只往文件追加一行，不碰 UI，本来也不需要主线程。
+    nonisolated static func trace(_ msg: String) {
         let line = String(Date().timeIntervalSince1970) + " " + msg + "\n"
         let url = URL(fileURLWithPath: "/tmp/whalefloat-notify.log")
         if let h = try? FileHandle(forWritingTo: url) {

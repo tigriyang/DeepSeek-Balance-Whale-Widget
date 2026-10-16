@@ -34,7 +34,7 @@ final class WhaleView: NSView {
     /// 可选角色素材（对应网页版「角色」菜单）。
     /// 文件名约定：`<角色名>.png` 为带泡原图，`<角色名>-nobubble.png` 为去泡版。
     /// 默认角色用的是**纯角色**素材（对应 Resources/role-clean.png）。
-    static let defaultCharacterName = "role-clean"
+    nonisolated static let defaultCharacterName = "role-clean"
     static let altCharacterName = "DSniang1"
     /// 原图像素边长（素材固有尺寸，坐标换算的基准）。
     static let sourcePixel: CGFloat = 1026
@@ -66,7 +66,7 @@ final class WhaleView: NSView {
 
     private let imageView = NSImageView()
     /// 内置的纯角色素材文件名（无气泡）。
-    static let defaultRoleFile = "role-clean.png"
+    nonisolated static let defaultRoleFile = "role-clean.png"
     /// 气泡形状层（独立绘制，不属于角色图）。
     private let bubbleShape = BubbleShapeView()
     private let stack = NSStackView()
