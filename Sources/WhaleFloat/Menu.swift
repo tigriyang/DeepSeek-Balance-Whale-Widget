@@ -80,7 +80,7 @@ enum AppInfo {
     /// 次要文字的字号（菜单、面板里的说明与数值统一用它）。
     static let subFontSize: CGFloat = 12
 
-    static let version = "0.1.1"
+    static let version = "0.1.2"
 }
 
 /// 外部链接。
