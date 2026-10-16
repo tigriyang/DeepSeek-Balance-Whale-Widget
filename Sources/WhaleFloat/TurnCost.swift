@@ -46,9 +46,30 @@ enum TurnLedger {
         ]
     }
 
+    /// 缓存：文件没变就复用上一次的结果。
+    ///
+    /// tick() 每秒调一次 load()，而账本有几十上百条事件 ——
+    /// 每次都读盘再解析属于白烧 IO。用修改时间做判据即可。
+    nonisolated(unsafe) private static var cache: (stamp: Date, ledger: Ledger?)?
+
+    /// 候选文件里最新的修改时间（作为缓存的判据）。没有文件时返回 distantPast。
+    private static func newestStamp() -> Date {
+        var newest = Date.distantPast
+        for url in fileCandidates {
+            if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+               let m = attrs[.modificationDate] as? Date, m > newest {
+                newest = m
+            }
+        }
+        return newest
+    }
+
     /// 读账本：在候选文件里取**事件最多的那份**，
     /// 避免新旧数据源切换的瞬间丢掉历史。
     static func load() -> Ledger? {
+        let stamp = newestStamp()
+        if let c = cache, c.stamp == stamp { return c.ledger }
+
         var best: Ledger?
         for url in fileCandidates {
             guard let data = try? Data(contentsOf: url),
@@ -59,6 +80,7 @@ enum TurnLedger {
                 best = led
             }
         }
+        cache = (stamp, best)
         return best
     }
 

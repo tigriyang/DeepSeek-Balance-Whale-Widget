@@ -133,7 +133,7 @@ final class AnalysisWindowController: NSObject {
         }
 
         // 三个灯各自独立：出问题时一眼看出卡在哪一环。
-        let dshUp = Self.isDSHRunning()
+        let dshUp = DSHLauncher.isRunning
         svc.set(ok: dshUp, detail: dshUp ? "DSH 在跑" : "DSH 没起来")
 
         let apiOK = lastBalanceOK ?? false
@@ -145,17 +145,6 @@ final class AnalysisWindowController: NSObject {
                 detail: hasLedger ? "\(events.count) 条记录" : "还没有记录")
     }
 
-    private static func isDSHRunning() -> Bool {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-        p.arguments = ["-nP", "-iTCP:3080", "-sTCP:LISTEN"]
-        p.standardOutput = Pipe()
-        p.standardError = FileHandle.nullDevice
-        p.standardInput = FileHandle.nullDevice
-        do { try p.run() } catch { return false }
-        p.waitUntilExit()
-        return p.terminationStatus == 0
-    }
 }
 
 /// 一个状态灯：圆点 + 名称。悬停能看到细节。

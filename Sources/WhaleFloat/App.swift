@@ -66,6 +66,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
+        // 先把设置规范到合法档位。
+        //
+        // 档位从「滑块调任意值」改成「固定两档」之后，旧配置里会留下
+        // 3.7、4、152 这类中间值：菜单按阈值判定它属于哪一档，
+        // 实际生效的却还是那个旧值 —— 表现为「显示的和实际的不一致」。
+        normalizeSettings()
+
         buildStatusItem()
 
 
@@ -139,6 +146,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for item in fresh.items {
             fresh.removeItem(item)
             menu.addItem(item)
+        }
+    }
+
+    /// 把设置里越界的值收拢到合法档位（老配置升级上来时会遇到）。
+    func normalizeSettings() {
+        var changed = false
+        // 气泡停留：只有 10 与 5 两档，以 7 为界
+        if settings.bubbleSeconds != 10 && settings.bubbleSeconds != 5 {
+            settings.bubbleSeconds = settings.bubbleSeconds >= 7 ? 10 : 5
+            changed = true
+        }
+        // 角色大小：只有 100%（304）与 50%（152）两档
+        let large = Self.sizeLarge, small = Self.sizeSmall
+        if settings.characterSize != large && settings.characterSize != small {
+            let mid = (large + small) / 2
+            settings.characterSize = settings.characterSize >= mid ? large : small
+            changed = true
+        }
+        if changed {
+            settings.save()
+            NSLog("WhaleFloat: 设置已规范到合法档位（气泡 \(settings.bubbleSeconds)s，尺寸 \(Int(settings.characterSize))）")
         }
     }
 
@@ -242,19 +270,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         row.orientation = .horizontal
         row.spacing = 3
         return row
-    }
-
-    /// DSH 是否在跑：看 3080 端口有没有监听（不打扰服务，也不需要凭据）。
-    private static func isDSHRunning() -> Bool {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-        p.arguments = ["-nP", "-iTCP:3080", "-sTCP:LISTEN"]
-        p.standardOutput = Pipe()
-        p.standardError = FileHandle.nullDevice
-        p.standardInput = FileHandle.nullDevice
-        do { try p.run() } catch { return false }
-        p.waitUntilExit()
-        return p.terminationStatus == 0
     }
 
     /// 设置页：紧凑的行式控件（菜单形态，不是原来的表单窗口）。
