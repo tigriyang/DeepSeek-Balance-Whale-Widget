@@ -340,7 +340,28 @@ launchd 的 `KeepAlive` 写 `<true/>` 的含义是「无论如何都保持运行
 
 「不授予再许可」意味着不能搬进别的项目再分发，所以这里排除。
 
-**用户可以自行准备**（放入 `Resources/`）：
+**放哪里**（程序按此顺序查找，找到即用）：
+
+```
+1. app 包内 Resources/                     ← 从 DMG 安装的走这条（只读）
+2. ~/.dsh/plugins/whalefloat/Resources/    ← 源码目录
+3. ~/.dsh/whalefloat-assets/               ← **推荐放这里**（可写，导入的角色也在这里）
+```
+
+**角色图**可以直接在菜单里导入：
+
+> 右键鲸鱼 → 高级设置 → 导入角色图片…
+
+**音效**走同一套查找逻辑，但没有 UI 入口 —— 把两个文件放进
+`~/.dsh/whalefloat-assets/` 即生效：
+
+```bash
+mkdir -p ~/.dsh/whalefloat-assets
+cp 你的按下音.mp3 ~/.dsh/whalefloat-assets/press-down.mp3
+cp 你的松开音.mp3 ~/.dsh/whalefloat-assets/press-up.mp3
+```
+
+**需要准备的五个文件**：
 
 | 文件 | 用途 | 说明 |
 |---|---|---|
