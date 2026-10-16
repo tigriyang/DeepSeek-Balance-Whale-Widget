@@ -201,10 +201,16 @@ final class FloatWindow: NSPanel {
 ///   大小 / 角色 / 气泡开关 / 按压泡泡 / 吸附翻转 / 资源管理（预警·预算）/ 音效
 struct Settings: Codable {
     // ── 外观 ────────────────────────────────────────────────
-    /// 角色显示边长（点）。对应网页版「大小」。
-    var characterSize: CGFloat = 220
-    /// 角色素材名（不含扩展名）。对应网页版「角色」。
-    var characterName: String = "DSniang02"
+    /// 角色显示边长（点）。
+    ///
+    /// 默认值**必须是合法档位之一**，否则首次启动会被 normalizeSettings
+    /// 悄悄改掉 —— 原先写的是 220（滑块时代的中间值），于是新用户装完
+    /// 看到的就是 152，跟「默认」两个字对不上。取小档，含蓄些。
+    var characterSize: CGFloat = 152
+    /// 角色素材名（不含扩展名）。
+    /// 默认用纯角色图；带手绘气泡的旧素材会被 normalizeRoleName 映射过来，
+    /// 但没必要让默认值指向它。
+    var characterName: String = "role-clean"
     /// 浮窗位置；nil 表示用默认（右下角）。
     var position: CGPoint?
 
@@ -269,8 +275,8 @@ struct Settings: Codable {
         func get<T: Decodable>(_ key: CodingKeys, _ fallback: T) -> T {
             (try? c.decode(T.self, forKey: key)) ?? fallback
         }
-        characterSize = get(.characterSize, 220)
-        characterName = get(.characterName, "DSniang02")
+        characterSize = get(.characterSize, 152)
+        characterName = get(.characterName, "role-clean")
         position = try? c.decodeIfPresent(CGPoint.self, forKey: .position)
         bubbleSeconds = get(.bubbleSeconds, 10)
         bubbleOn = get(.bubbleOn, true)
