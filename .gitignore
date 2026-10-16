@@ -1,6 +1,8 @@
 # 构建产物
 .build/
-dist/            # DMG 等打包产物，走 GitHub Releases 而不是入库
+# 打包产物：走 GitHub Releases，不入库
+# （注意：.gitignore **不支持行尾注释**，注释必须独占一行）
+dist/
 *.o
 *.swiftmodule
 
