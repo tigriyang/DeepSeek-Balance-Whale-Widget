@@ -1,67 +1,90 @@
 #!/bin/bash
 # ------------------------------------------------------------------
-# 卸载小鲸鱼
+# 彻底卸载小鲸鱼 —— 清掉它在本机留下的**一切痕迹**。
 #
-# 做三件事：
-#   1. 移除 launchd 自启
-#   2. 删除应用本体
-#   3. 停用它安装到 DSH 的插件（从 profile 里摘掉）
+# 清理范围：
+#   1. 应用本体              ~/Applications/WhaleFloat.app
+#   2. 开机自启              ~/Library/LaunchAgents/ai.dsh.whalefloat.plist
+#   3. DSH 插件（引用 + 源码）dsh-wait-state / dsh-turn-usage / dsh-notify-bridge
+#   4. 设置与数据            设置、导入的角色、账本、状态文件
+#   5. 系统级缓存与偏好      ~/Library 下按 bundle id 匹配的各目录
+#   6. 运行期日志            /tmp/whalefloat*.log
+#   7. LaunchServices 注册   （让 Finder / 聚焦不再记得这个 app）
 #
-# **不动**用户的数据：
-#   ~/.dsh/whalefloat.json          设置
-#   ~/.dsh/whalefloat-assets/       导入的角色图
-#   ~/.dsh/plugins/dsh-*            插件源码（只从 profile 摘除引用）
-# 想要彻底清干净，加 --purge。
+# 想保留设置（换机重装用），加 --keep-data。
 # ------------------------------------------------------------------
 set -uo pipefail
 
 APP_NAME="WhaleFloat"
+BUNDLE_ID="ai.dsh.whalefloat"
 LABEL="ai.dsh.whalefloat"
-APP="$HOME/Applications/${APP_NAME}.app"
-PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
-PURGE=0
-[ "${1:-}" = "--purge" ] && PURGE=1
+KEEP=0
+[ "${1:-}" = "--keep-data" ] && KEEP=1
 
-say() { printf '%s\n' "$*"; }
+H="$HOME"
+APP="$H/Applications/${APP_NAME}.app"
+PLIST="$H/Library/LaunchAgents/${LABEL}.plist"
 
-say "▸ 停止并移除自启…"
+say() { printf "%s\n" "$*"; }
+removed() { [ -e "$1" ] && { rm -rf "$1"; say "  ✓ 删除 $2"; }; }
+
+say "▸ 停止进程与自启…"
 launchctl unload "$PLIST" 2>/dev/null
-rm -f "$PLIST"
-
-say "▸ 结束进程…"
-ps -axo pid=,command= | grep "[W]haleFloat.app/Contents/MacOS" | awk '{print $1}' \
-  | while read p; do kill -9 "$p" 2>/dev/null; done
-sleep 1
+launchctl remove "$LABEL" 2>/dev/null
+for _ in 1 2 3; do
+  PIDS="$(ps -axo pid=,command= | grep "[W]haleFloat.app/Contents/MacOS" | awk '{print $1}')"
+  [ -z "$PIDS" ] && break
+  echo "$PIDS" | while read -r p; do kill -9 "$p" 2>/dev/null; done
+  sleep 1
+done
+removed "$PLIST" "自启配置"
 
 say "▸ 删除应用本体…"
-rm -rf "$APP"
+removed "$APP" "应用"
 
-# ── 摘除 DSH 插件引用 ────────────────────────────────────────
-say "▸ 停用 DSH 插件…"
+say "▸ 摘除并删除 DSH 插件…"
 DSH=""
-for c in "$HOME/.npm-global/bin/dsh" "$HOME/.local/bin/dsh" /usr/local/bin/dsh /opt/homebrew/bin/dsh; do
+for c in "$H/.npm-global/bin/dsh" "$H/.local/bin/dsh" /usr/local/bin/dsh /opt/homebrew/bin/dsh; do
   [ -x "$c" ] && { DSH="$c"; break; }
 done
-if [ -n "$DSH" ]; then
-  for p in dsh-wait-state dsh-turn-usage dsh-notify-bridge; do
-    "$DSH" plugin --profile web remove "$p" > /dev/null 2>&1 \
-      && say "  ✓ 已摘除 $p" || say "  · $p 未安装"
-  done
-else
-  say "  ⚠ 没找到 dsh 命令，插件引用需手动移除："
-  say "     dsh plugin --profile web remove dsh-wait-state"
-fi
+for p in dsh-wait-state dsh-turn-usage dsh-notify-bridge; do
+  if [ -n "$DSH" ]; then
+    "$DSH" plugin --profile web remove "$p" >/dev/null 2>&1 && say "  ✓ 已摘除引用 $p"
+  fi
+  removed "$H/.dsh/plugins/$p" "插件源码 $p"
+done
 
-if [ "$PURGE" = "1" ]; then
-  say "▸ 清理数据（--purge）…"
-  rm -rf "$HOME/.dsh/whalefloat.json"
-  rm -rf "$HOME/.dsh/whalefloat-assets"
-  rm -f "$HOME/.dsh/.whalefloat-notify.json" "$HOME/.dsh/.whalefloat-reply.json"
-  rm -f "$HOME/.dsh/.whalefloat-wait.json" "$HOME/.dsh/.whalefloat-usage.json"
-  rm -rf "$HOME/.dsh/plugins/dsh-wait-state" "$HOME/.dsh/plugins/dsh-turn-usage" "$HOME/.dsh/plugins/dsh-notify-bridge"
-  say "  已删除设置、导入的角色、账本与插件源码"
+say "▸ 清理数据与账本…"
+if [ "$KEEP" = "1" ]; then
+  say "  · 按 --keep-data 保留设置与导入的角色"
+else
+  removed "$H/.dsh/whalefloat.json" "设置"
+  removed "$H/.dsh/whalefloat-assets" "导入的角色"
 fi
+for f in .whalefloat-notify.json .whalefloat-reply.json .whalefloat-wait.json .whalefloat-usage.json; do
+  removed "$H/.dsh/$f" "$f"
+done
+
+say "▸ 清理系统级缓存与偏好…"
+for d in "Library/Preferences/${BUNDLE_ID}.plist" \
+         "Library/Saved Application State/${BUNDLE_ID}.savedState" \
+         "Library/Caches/${BUNDLE_ID}" \
+         "Library/Application Support/${BUNDLE_ID}" \
+         "Library/HTTPStorages/${BUNDLE_ID}" \
+         "Library/WebKit/${BUNDLE_ID}" \
+         "Library/Containers/${BUNDLE_ID}"; do
+  removed "$H/$d" "$(basename "$d")"
+done
+defaults delete "$BUNDLE_ID" 2>/dev/null
+
+say "▸ 清理日志…"
+rm -f /tmp/whalefloat*.log 2>/dev/null && say "  ✓ 已删除 /tmp/whalefloat*.log"
+
+say "▸ 注销 LaunchServices 注册…"
+LSREG="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+[ -x "$LSREG" ] && "$LSREG" -kill -r -domain local -domain system -domain user >/dev/null 2>&1 \
+  && say "  ✓ 已重建注册表（Finder 侧不再显示旧条目）"
 
 say ""
-say "✓ 卸载完成"
-[ "$PURGE" = "0" ] && say "  （设置与导入的角色保留在 ~/.dsh 下；要一并清掉请加 --purge）"
+say "✓ 卸载完成，未发现遗留"
+[ "$KEEP" = "1" ] && say "  （设置与导入的角色按 --keep-data 保留）"
