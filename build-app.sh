@@ -114,15 +114,21 @@ cat > "$DEST/Contents/Info.plist" <<PLIST
 PLIST
 
 echo "▸ 本地签名（ad-hoc）…"
-# 签名。**只在二进制真的变了才重签** ——
-# ad-hoc 签名没有身份，macOS 的 TCC 只能靠 CDHash 认人；
-# 每次构建都重签会让 CDHash 变化，系统就把 app 当成新的，
-# 日历等权限于是要重新授权一遍。
-if cmp -s "$BIN" "$DEST/Contents/MacOS/${APP_NAME}"; then
-    echo "  二进制未变，签名保持不变"
+# 签名。用固定的自签名证书「WhaleFloat Dev」，而不是 ad-hoc。
+#
+# 为什么：ad-hoc 签名没有身份，macOS 的 TCC 只能靠 CDHash 认人 ——
+# 每次构建重签就把 app 当成新的，日历等权限要重新授权。
+# 换成有身份的证书后，TCC 认的是证书，代码怎么改权限都保住。
+#
+# 证书装法见仓库 README 或 /tmp/setup_cert.sh。没装则回退 ad-hoc。
+SIGN_ID="WhaleFloat Dev"
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "$SIGN_ID"; then
+    codesign --force --deep --sign "$SIGN_ID" "$DEST" 2>&1 | tail -1 \
+        || echo "（签名失败，回退 ad-hoc）"
 else
-    codesign --force --deep --sign - "$DEST" 2>&1 | tail -1 || echo "（签名跳过，本地运行不受影响）"
+    echo "  未找到签名证书，回退 ad-hoc（日历权限会每次重问）"
+    codesign --force --deep --sign - "$DEST" 2>&1 | tail -1 \
+        || echo "（签名跳过，本地运行不受影响）"
 fi
-
 echo "✓ 已安装：$DEST"
 echo "  运行：open "$DEST""

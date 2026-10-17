@@ -123,7 +123,7 @@ enum AppInfo {
     ///
     /// **只被 build-app.sh 读取**，用来写进 Info.plist —— 运行时不读它。
     /// 改这里之后必须重新跑构建，Finder 与菜单里显示的版本才会跟着变。
-    static let version = "0.1.9"
+    static let version = "0.2.0"
 }
 
 /// 外部链接。
