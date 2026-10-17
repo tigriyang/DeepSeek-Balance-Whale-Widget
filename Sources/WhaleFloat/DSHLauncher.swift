@@ -50,9 +50,57 @@ enum DSHLauncher {
     ///      stdin 若继承终端会挂住不返回；
     ///   2. 捕获输出 —— 否则端口被占之类的失败用户完全看不到；
     ///   3. 记住进程 —— 启动器内部有最长约 30 秒的等待，期间重复点会起第二个。
+    /// 已认证 URL 的缓存（URL 一行、PID 一行）。
+    ///
+    /// token 是每个进程新生成的，且只在启动输出里出现一次 —— 事后取不回。
+    /// 所以缓存里连 PID 一起记：PID 对得上才说明这个 token 还属于
+    /// 端口上那个进程，否则它已经作废。
+    private static var urlCachePath: String {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".dsh/web.url").path
+    }
+
+    /// 端口上正在监听的进程 PID。没有则 nil。
+    nonisolated static func listeningPID(_ port: UInt16) -> Int32? {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        p.arguments = ["-nP", "-iTCP:\(port)", "-sTCP:LISTEN", "-t"]
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = FileHandle.nullDevice
+        p.standardInput = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return nil }
+        p.waitUntilExit()
+        let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        return out.split(separator: "\n").compactMap { Int32($0.trimmingCharacters(in: .whitespaces)) }.first
+    }
+
+    /// 若缓存里的 URL 仍属于端口上那个进程，返回它。
+    private static func liveAuthenticatedURL() -> URL? {
+        guard let text = try? String(contentsOfFile: urlCachePath, encoding: .utf8) else { return nil }
+        let lines = text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+        guard lines.count >= 2,
+              let url = URL(string: lines[0]),
+              let cachedPID = Int32(lines[1]),
+              let livePID = listeningPID(3080),
+              cachedPID == livePID
+        else { return nil }
+        return url
+    }
+
     static func launch() {
         if let p = running, p.isRunning {
             notify("正在启动中…", "DSH 启动器已在运行，请稍候再试。")
+            return
+        }
+
+        // 智能开关的第一判断：已经在跑就只开页面。
+        //
+        // 这一步放在起脚本之前 —— 脚本内部其实也做了同样的判断，但那是
+        // 一个 bash 进程、还有最长约 30 秒的等待。用户点一下只想要个窗口，
+        // 毫秒级返回比什么都强。
+        if let live = liveAuthenticatedURL() {
+            NSWorkspace.shared.open(live)
             return
         }
         guard let scriptPath else {

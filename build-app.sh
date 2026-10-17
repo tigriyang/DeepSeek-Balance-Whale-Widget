@@ -74,7 +74,7 @@ fi
 # 后者是安装目标：卸载脚本会把它清掉，从那里读会导致
 # 「卸过一次之后，再构建出来的包里就没有插件了」。
 mkdir -p "$DEST/Contents/Resources/plugins"
-for p in dsh-wait-state dsh-turn-usage dsh-notify-bridge; do
+for p in dsh-whalefloat-helper; do
   SRC_PLUGIN="$HERE/plugins/$p"
   if [ -d "$SRC_PLUGIN" ]; then
     rm -rf "$DEST/Contents/Resources/plugins/$p"

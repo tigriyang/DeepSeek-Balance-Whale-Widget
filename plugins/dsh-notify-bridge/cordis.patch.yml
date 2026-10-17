@@ -1,4 +1,0 @@
-# dsh-notify-bridge bundle patch
-- insert:
-    - id: notify-bridge
-      name: 'dsh-notify-bridge'

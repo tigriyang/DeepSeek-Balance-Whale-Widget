@@ -162,9 +162,11 @@ final class NotifyBridge: NSObject, UNUserNotificationCenterDelegate {
 
     private func push(id: String, title: String, body: String, sessionId: String) {
         let content = UNMutableNotificationContent()
-        // 不要标题 —— 通知栏会出现「DSH · DSH」这种重复的第一行，
-        // 而且占掉本就有限的高度。正文里已经有全部信息。
-        content.title = ""
+        // 标题必须有 —— macOS 的通知在 title 为空时**不显示**，
+        // 而 add() 仍会返回成功，于是日志里全是「推送成功」但屏幕上什么都没有。
+        // 上一轮为了去掉「DSH · DSH」这个重复，把标题清空了，踩的就是这个坑。
+        // 现在用 app 名，简短且不重复。
+        content.title = "小鲸鱼"
         content.body = Self.plainText(from: body)
         content.categoryIdentifier = Self.categoryID
         content.sound = .default

@@ -13,6 +13,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let client = BalanceClient()
     var settings = Settings.load()
 
+    /// 由命令行参数 --analysis 置位：启动完成后直接打开分析窗口。
+    var openAnalysisOnLaunch = false
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 单实例守卫必须放在最前面 —— 宁可什么都不做，也别多起一只鲸鱼。
         guard SingleInstance.acquire() else {
@@ -41,6 +44,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         startRefreshLoop()
 
+        // --analysis：启动即开分析窗口（截图、脚本化演示都靠它）
+        if openAnalysisOnLaunch {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                self?.openLedger()
+            }
+        }
+
         // 日历访问：用于判断「今天是不是法定假日」。
         // 不是敏感权限（只读节假日标记，不读用户自己的日程），
         // 首次会弹一次系统授权框，拒绝也不影响其它功能。
@@ -63,6 +73,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // 插件随包发布，装上就好；弹模态框会阻塞主线程，
         // 自动化流程碰上它就卡住了。
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            // 先摘掉合并前的三个旧插件，再装新 helper ——
+            // 否则两套并存，事件会被处理两遍。
+            PluginInstaller.removeLegacy()
             PluginInstaller.installMissingQuietly()
         }
     }
@@ -609,7 +622,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for pid in ProcessManager.pids(matching: "dsh web") {
             kill(pid, SIGKILL)
         }
-        // ③ 交给启动器重新拉起（它会开浏览器）
+        // ③ 再等端口真的松开 —— 进程没了不等于端口没了，
+        //    差这一两秒就会撞 EADDRINUSE，表现成「DSH 起不来」。
+        let freed = await Task.detached {
+            ProcessManager.waitForPortFree(3080, timeout: 6.0)
+        }.value
+        if !freed {
+            NSLog("WhaleFloat: 重启 DSH 时 3080 仍被占用")
+        }
+        // ④ 交给启动器重新拉起（它会开浏览器）
         DSHLauncher.launch()
     }
 

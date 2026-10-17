@@ -13,13 +13,21 @@ import Foundation
 @MainActor
 enum PluginInstaller {
     /// 随包发布的中介插件（目录名）。
-    static let bundled = ["dsh-wait-state", "dsh-turn-usage", "dsh-notify-bridge"]
+    /// 随包发布的中介插件。
+    ///
+    /// 原先三者独立（wait-state / turn-usage / notify-bridge），
+    /// 但它们订阅的是同一条 session/event 事件流 —— 合并成一个
+    /// helper 后只订阅一次，profile 里也只留一个条目。
+    static let bundled = ["dsh-whalefloat-helper"]
+
+    /// 已废弃的旧插件名。启动时顺手摘掉，避免用户升级后两套并存。
+    static let legacy = ["dsh-wait-state", "dsh-turn-usage", "dsh-notify-bridge"]
 
     /// 插件的人类可读说明（用于安装提示）。
     static let descriptions: [String: String] = [
         "dsh-wait-state": "等用户回答 / 授权时，让浮窗冒泡提示",
         "dsh-turn-usage": "采集每轮对话消耗，供浮窗显示¥金额",
-        "dsh-notify-bridge": "把对话输出推送到系统通知，并支持在通知里直接回复",
+        "dsh-whalefloat-helper": "等待提示 / 每轮消耗 / 系统通知，三合一中介",
     ]
 
     static var pluginsDir: URL {
@@ -142,6 +150,24 @@ enum PluginInstaller {
         }
         if ok == names.count { return "已注册 \(ok) 个插件进 DSH 的 web profile。" }
         return (["⚠ 注册了 \(ok)/\(names.count) 个"] + log).joined(separator: "\n")
+    }
+
+    /// 摘掉已废弃的旧插件（升级时清理用）。
+    static func removeLegacy() {
+        guard let dsh = dshExecutable else { return }
+        for name in legacy where isInstalled(name) {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: dsh)
+            p.arguments = ["plugin", "--profile", "web", "remove", name]
+            p.standardOutput = FileHandle.nullDevice
+            p.standardError = FileHandle.nullDevice
+            try? p.run()
+            p.waitUntilExit()
+            // 源码目录也删掉，避免两套并存
+            try? FileManager.default.removeItem(
+                at: pluginsDir.appendingPathComponent(name))
+            NSLog("WhaleFloat: 已移除旧插件 \(name)")
+        }
     }
 
     /// dsh 可执行文件的位置（摘插件时要调它）。

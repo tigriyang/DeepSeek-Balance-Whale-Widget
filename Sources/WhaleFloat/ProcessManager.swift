@@ -119,7 +119,41 @@ enum ProcessManager {
         // 复核，如实报告剩余
         let left = snapshot().filter { $0.pid != selfPID && isTarget($0.command) }
         let tail = left.isEmpty ? "" : "；仍有 \(left.count) 个未结束"
-        return "已结束 \(unique.count) 个进程（强制 \(forced) 个）\(tail)"
+
+        // 等 3080 真的松开。
+        //
+        // 进程退出与端口释放不是同一时刻：SIGKILL 之后内核还要收尾，
+        // 慢的时候能拖上一两秒。这时候若马上再起一个 dsh web，
+        // 就会撞上 EADDRINUSE —— 用户看到的现象是「DSH 崩了」，
+        // 日志里只有一行 address already in use。
+        let freed = waitForPortFree(3080, timeout: 6.0)
+        let portNote = freed ? "" : "；3080 端口仍被占用"
+        return "已结束 \(unique.count) 个进程（强制 \(forced) 个）\(tail)\(portNote)"
+    }
+
+    /// 轮询直到端口不再有人监听。返回是否在超时前松开。
+    ///
+    /// nonisolated：只跑 lsof、不碰 UI，可以从后台任务调用。
+    nonisolated static func waitForPortFree(_ port: UInt16, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if !isPortListening(port) { return true }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        return !isPortListening(port)
+    }
+
+    /// 端口当前是否有进程在 LISTEN。
+    nonisolated static func isPortListening(_ port: UInt16) -> Bool {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        p.arguments = ["-nP", "-iTCP:\(port)", "-sTCP:LISTEN"]
+        p.standardOutput = Pipe()
+        p.standardError = FileHandle.nullDevice
+        p.standardInput = FileHandle.nullDevice
+        do { try p.run() } catch { return false }
+        p.waitUntilExit()
+        return p.terminationStatus == 0
     }
 }
 
