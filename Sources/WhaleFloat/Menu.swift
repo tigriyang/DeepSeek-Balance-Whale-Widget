@@ -63,6 +63,14 @@ enum MenuBuilder {
         // 卸载入口：清自启 + 摘插件 + 本体进废纸篓。
         // 拖进废纸篓也能删掉本体，但 launchd 配置和 DSH 插件会留下。
         add(m, "卸载 WhaleFloat…", #selector(AppDelegate.uninstallSelf), target)
+        m.addItem(.separator())
+        // 版本号：从 Info.plist 读，与 Finder 里看到的一致。
+        // 原先 AppInfo.version 这个常量根本没人读，改它也不影响任何显示 ——
+        // 真正决定显示版本的是 build-app.sh 写进 plist 的值。
+        let ver = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        let verItem = NSMenuItem(title: "WhaleFloat \(ver)", action: nil, keyEquivalent: "")
+        verItem.isEnabled = false
+        m.addItem(verItem)
         return m
     }
 
@@ -111,7 +119,11 @@ enum AppInfo {
         return String(format: "%@%.2f", symbol, v)
     }
 
-    static let version = "0.1.8"
+    /// 应用版本。
+    ///
+    /// **只被 build-app.sh 读取**，用来写进 Info.plist —— 运行时不读它。
+    /// 改这里之后必须重新跑构建，Finder 与菜单里显示的版本才会跟着变。
+    static let version = "0.1.9"
 }
 
 /// 外部链接。
