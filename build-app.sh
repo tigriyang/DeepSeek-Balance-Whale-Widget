@@ -14,11 +14,12 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="WhaleFloat"
 BUNDLE_ID="ai.dsh.whalefloat"
-# 版本号从源码读（AppInfo.version）。
-# 这里原先硬编码 "0.1.0" —— 源码改到 0.1.9 了，Info.plist 还是 0.1.0，
-# Finder 里看到的版本永远是旧的。
-VERSION="$(awk -F'"' '/static let version/ {print $2; exit}' \
-  "$HERE/Sources/WhaleFloat/Menu.swift" 2>/dev/null)"
+# 版本号从源码读。它在 AppInfo.swift 里，
+# 原先在 Menu.swift —— 拆分文件后这里的路径没跟着改，
+# 读不到就回退成 0.1.0，Finder 里于是看到旧版本。
+# 用 grep -r 扫整个源码目录，以后再搬家也不会失效。
+VERSION="$(grep -rhoE 'static let version = "[0-9.]+"' "$HERE/Sources/WhaleFloat/" 2>/dev/null \
+  | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
 [ -z "$VERSION" ] && VERSION="0.1.0"
 # 装到系统的 /Applications —— Finder 侧边栏「应用程序」指向的是这里，
 # 装到 ~/Applications 的话在侧边栏里看不到，也不符合拖进「应用程序」的直觉。
