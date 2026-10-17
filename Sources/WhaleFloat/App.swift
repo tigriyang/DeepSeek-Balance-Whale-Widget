@@ -97,6 +97,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // 对话输出 → 系统通知（带回复框）。首次会弹一次系统授权对话框。
         NotifyBridge.shared.start()
+        // 点通知 → 跳到 DSH 看这条对话
+        NotifyBridge.onOpenConversation = { [weak self] in self?.jumpToDSH() }
 
         // 从 DMG 拖进「应用程序」的首次运行：自己把 launchd 自启装好。
         // 这样安装只需一步（拖拽），不用再跑 install.sh。
@@ -244,12 +246,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         win.orderFrontRegardless()
     }
 
-    /// 单击鲸鱼 → 冒泡显示余额（10 秒后自动消失）。
-    /// 跳到 DSH 的界面。已在运行时浏览器会切到那个标签页。
+    /// 跳到 DSH 的界面（不负责启动）。
+    ///
+    /// 与 launchDSH 的分工：
+    ///   · jumpToDSH  —— DSH 已经在跑，只是把浏览器切过去
+    ///   · launchDSH  —— 不确定在不在跑，交给启动器处理（会复用认证 URL、必要时拉起）
+    /// 通知点击、等待气泡点击走前者；状态栏左键和菜单项走后者。
     func jumpToDSH() {
-        if let url = URL(string: "http://127.0.0.1:3080") {
-            NSWorkspace.shared.open(url)
-        }
+        guard let url = URL(string: "http://127.0.0.1:3080") else { return }
+        NSWorkspace.shared.open(url)
     }
 
     private func showBalanceBubble() {
@@ -519,23 +524,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             accessibilityDescription: "WhaleFloat"
         )
         item.button?.image?.isTemplate = true
-        // 顺序要紧：先存下 statusItem，再建菜单 ——
-        // rebuildStatusMenu 是读 statusItem 的，反过来的话它拿到 nil 就直接返回了，
-        // 表现为「点图标没反应」。
         statusItem = item
-        // 用系统菜单：点外面自动消失、二级菜单、勾选状态都是现成的。
-        rebuildStatusMenu()
+
+        // 左右键分工：
+        //   左键 → 打开 DSH GUI（最常做的事，一步到位）
+        //   右键 → 弹菜单
+        // 所以这里**不设 item.menu** —— 一旦设了，系统会接管左键去弹菜单，
+        // 我们就分不出左右键了。
+        item.button?.target = self
+        item.button?.action = #selector(statusItemClicked(_:))
+        item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
     }
 
-    /// 重建状态栏菜单（设置变化后、每次打开前调用）。
-    ///
-    /// 重建而不是改已有项：档位只有一个能被勾选，重建最不容易出错。
-    func rebuildStatusMenu() {
-        guard let item = statusItem else { return }
-        let menu = MenuBuilder.build(target: self)
-        menu.delegate = self
-        item.menu = menu
+    /// 状态栏图标被点。
+    @objc func statusItemClicked(_ sender: NSStatusBarButton) {
+        let isRight = NSApp.currentEvent?.type == .rightMouseUp
+        if isRight {
+            let menu = MenuBuilder.build(target: self)
+            menu.delegate = self
+            // 从图标正下方弹出。popUp 是同步的（会阻塞到菜单关闭），
+            // 这是 AppKit 菜单的标准行为。
+            menu.popUp(positioning: nil,
+                       at: NSPoint(x: 0, y: sender.bounds.height + 4),
+                       in: sender)
+        } else {
+            launchDSH()
+        }
     }
+
 
     /// 供菜单项调用的动作集合。
     @objc func refreshNow() {

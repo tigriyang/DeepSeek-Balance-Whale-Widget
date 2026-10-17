@@ -16,6 +16,10 @@ import UserNotifications
 final class NotifyBridge: NSObject, UNUserNotificationCenterDelegate {
     static let shared = NotifyBridge()
 
+    /// 点通知本体时调用（由 App 注入）。
+    /// 这里不直接碰 UI 层 —— 通知模块只管通知。
+    static var onOpenConversation: (() -> Void)?
+
     private static let categoryID = "DSH_REPLY"
     private static let replyActionID = "DSH_REPLY_ACTION"
 
@@ -33,7 +37,7 @@ final class NotifyBridge: NSObject, UNUserNotificationCenterDelegate {
     }
 
     /// 诊断输出（NSLog 走系统日志，这里额外落个文件方便排查）。
-    /// 诊断输出。nonisolated —— 调用它的地方多在 URLSession 回调里，
+    /// nonisolated —— 调用它的地方多在 URLSession 回调里，
     /// 那些不是主线程，标成 MainActor 会触发隔离违规。
     /// 它只往文件追加一行，不碰 UI，本来也不需要主线程。
     nonisolated static func trace(_ msg: String) {
@@ -188,11 +192,23 @@ final class NotifyBridge: NSObject, UNUserNotificationCenterDelegate {
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         defer { completionHandler() }
-        guard let textResponse = response as? UNTextInputNotificationResponse else { return }
-        let text = textResponse.userText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        let sessionId = (response.notification.request.content.userInfo["sessionId"] as? String) ?? ""
-        Task { @MainActor in Self.shared.writeReply(text: text, sessionId: sessionId) }
+
+        // ① 用户在通知里输入了回复
+        if let textResponse = response as? UNTextInputNotificationResponse {
+            let text = textResponse.userText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return }
+            let sessionId = (response.notification.request.content.userInfo["sessionId"] as? String) ?? ""
+            Task { @MainActor in Self.shared.writeReply(text: text, sessionId: sessionId) }
+            return
+        }
+
+        // ② 直接点通知本体 → 去 DSH 看这条对话
+        // 之前只处理了文本回复，点通知本身毫无反应。
+        if response.actionIdentifier == UNNotificationDefaultActionIdentifier
+            || response.actionIdentifier == UNNotificationDismissActionIdentifier {
+            guard response.actionIdentifier == UNNotificationDefaultActionIdentifier else { return }
+            Task { @MainActor in Self.onOpenConversation?() }
+        }
     }
 
     /// 把回复写回文件，DSH 侧插件轮询到后会注入对话。
