@@ -1,0 +1,4 @@
+# dsh-whalefloat-helper bundle patch
+- insert:
+    - id: whalefloat-helper
+      name: 'dsh-whalefloat-helper'

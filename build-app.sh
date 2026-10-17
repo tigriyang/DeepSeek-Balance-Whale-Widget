@@ -14,11 +14,12 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="WhaleFloat"
 BUNDLE_ID="ai.dsh.whalefloat"
-# 版本号从源码读（AppInfo.version）。
-# 这里原先硬编码 "0.1.0" —— 源码改到 0.1.9 了，Info.plist 还是 0.1.0，
-# Finder 里看到的版本永远是旧的。
-VERSION="$(awk -F'"' '/static let version/ {print $2; exit}' \
-  "$HERE/Sources/WhaleFloat/Menu.swift" 2>/dev/null)"
+# 版本号从源码读。它在 AppInfo.swift 里，
+# 原先在 Menu.swift —— 拆分文件后这里的路径没跟着改，
+# 读不到就回退成 0.1.0，Finder 里于是看到旧版本。
+# 用 grep -r 扫整个源码目录，以后再搬家也不会失效。
+VERSION="$(grep -rhoE 'static let version = "[0-9.]+"' "$HERE/Sources/WhaleFloat/" 2>/dev/null \
+  | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
 [ -z "$VERSION" ] && VERSION="0.1.0"
 # 装到系统的 /Applications —— Finder 侧边栏「应用程序」指向的是这里，
 # 装到 ~/Applications 的话在侧边栏里看不到，也不符合拖进「应用程序」的直觉。
@@ -73,7 +74,7 @@ fi
 # 后者是安装目标：卸载脚本会把它清掉，从那里读会导致
 # 「卸过一次之后，再构建出来的包里就没有插件了」。
 mkdir -p "$DEST/Contents/Resources/plugins"
-for p in dsh-wait-state dsh-turn-usage dsh-notify-bridge; do
+for p in dsh-whalefloat-helper; do
   SRC_PLUGIN="$HERE/plugins/$p"
   if [ -d "$SRC_PLUGIN" ]; then
     rm -rf "$DEST/Contents/Resources/plugins/$p"
@@ -113,22 +114,30 @@ cat > "$DEST/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-echo "▸ 本地签名（ad-hoc）…"
-# 签名。用固定的自签名证书「WhaleFloat Dev」，而不是 ad-hoc。
+# 签名策略：本地构建与发布包分开。
 #
-# 为什么：ad-hoc 签名没有身份，macOS 的 TCC 只能靠 CDHash 认人 ——
-# 每次构建重签就把 app 当成新的，日历等权限要重新授权。
-# 换成有身份的证书后，TCC 认的是证书，代码怎么改权限都保住。
+#   本地构建（默认）    用自签名证书「WhaleFloat Dev」
+#                       → TCC 认证书身份，反复构建也不会重置权限
+#   发布包（RELEASE=1） 用 ad-hoc
+#                       → 自签名证书不在用户机器上，分发出去反而多一层
+#                         「未知证书」的恐吓提示。反正都要右键打开，
+#                         ad-hoc 更干脆。
 #
-# 证书装法见仓库 README 或 /tmp/setup_cert.sh。没装则回退 ad-hoc。
+# 另一个事实：分发的 app 不会重建，CDHash 固定，权限本来就稳定 ——
+# 「权限反复要」只是开发期的现象。
 SIGN_ID="WhaleFloat Dev"
-if security find-identity -v -p codesigning 2>/dev/null | grep -q "$SIGN_ID"; then
+
+if [ "${RELEASE:-0}" = "1" ]; then
+    echo "▸ 签名（发布包：ad-hoc）…"
+    codesign --force --deep --sign - "$DEST" 2>&1 | tail -1 \
+        || echo "（签名跳过，本地运行不受影响）"
+elif security find-identity -v -p codesigning 2>/dev/null | grep -q "$SIGN_ID"; then
+    echo "▸ 签名（本地构建：$SIGN_ID）…"
     codesign --force --deep --sign "$SIGN_ID" "$DEST" 2>&1 | tail -1 \
         || echo "（签名失败，回退 ad-hoc）"
 else
-    echo "  未找到签名证书，回退 ad-hoc（日历权限会每次重问）"
+    echo "▸ 签名（未找到证书，回退 ad-hoc）…"
     codesign --force --deep --sign - "$DEST" 2>&1 | tail -1 \
         || echo "（签名跳过，本地运行不受影响）"
 fi
-echo "✓ 已安装：$DEST"
 echo "  运行：open "$DEST""

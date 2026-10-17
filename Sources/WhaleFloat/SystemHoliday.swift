@@ -31,8 +31,10 @@ enum SystemHoliday {
 
     /// EKEventStore 不是 Sendable，但只在主线程用。
     nonisolated(unsafe) private static let store = EKEventStore()
+    /// 由 lock 保护 —— 授权回调在后台线程、查询在主线程。
     nonisolated(unsafe) private static var authorized = false
     nonisolated(unsafe) private static var asked = false
+    private static let stateLock = NSLock()
 
     /// 确认访问权限。
     ///
@@ -40,11 +42,17 @@ enum SystemHoliday {
     /// 之前每次启动都无脑调 requestFullAccessToEvents，系统哪怕已经允许过
     /// 也可能再弹一次框（尤其是二进制重新签名之后）。
     static func requestAccessIfNeeded(completion: (@Sendable (Bool) -> Void)? = nil) {
-        if asked { completion?(authorized); return }
-        asked = true
+        stateLock.lock()
+        let alreadyAsked = asked
+        let alreadyAuthorized = authorized
+        if !alreadyAsked { asked = true }
+        stateLock.unlock()
+        if alreadyAsked { completion?(alreadyAuthorized); return }
 
         let done: @Sendable (Bool) -> Void = { ok in
+            stateLock.lock()
             authorized = ok
+            stateLock.unlock()
             NSLog("WhaleFloat: 日历访问 \(ok ? "已允许" : "未获授权")")
             DispatchQueue.main.async { completion?(ok) }
         }
@@ -84,7 +92,10 @@ enum SystemHoliday {
     /// 返回 nil 表示「查不到」（没授权 / 没订阅节假日日历）——
     /// 调用方应当退回自己那份数据，而不是当成「不是假日」。
     static func isTodayHoliday() -> Bool? {
-        guard authorized else { return nil }
+        stateLock.lock()
+        let ok = authorized
+        stateLock.unlock()
+        guard ok else { return nil }
         guard let cal = holidayCalendar() else { return nil }
 
         let now = Date()

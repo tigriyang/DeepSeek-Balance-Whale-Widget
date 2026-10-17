@@ -14,7 +14,7 @@
 
 ### 1. 启动 DSH GUI（核心）
 
-菜单栏点一下「启动 DSH GUI」，程序会：
+**点状态栏图标（左键）** 就能起 DSH，或用菜单里的「启动 DSH GUI」。程序会：
 
 ```
 · 静默执行启动器脚本（不弹终端窗口）
@@ -36,19 +36,22 @@
 首次运行时程序自己把 launchd 配置装好，你不需要跑任何脚本。
 ```
 
+另有一层**单实例守卫**（文件锁）：即便被 launchd 和手动启动同时拉起，
+也只会活下来一个。
+
 ### 3. 插件安装
 
-随包携带**三个** DSH 侧的中介插件，首次运行时**静默装好**（不弹框）：
+随包携带**一个** DSH 侧的中介插件，首次运行时静默装好：
 
 | 插件 | 作用 |
 |---|---|
-| `dsh-wait-state` | DSH 等你回答 / 授权时，浮窗冒泡提醒 |
-| `dsh-turn-usage` | 采集每轮消耗，供浮窗显示金额 |
-| `dsh-notify-bridge` | 把回复推到系统通知，并支持在通知里直接回复 |
+| `dsh-whalefloat-helper` | 等待提示 / 每轮消耗 / 系统通知，三合一 |
+
+它原先拆成三个（wait-state / turn-usage / notify-bridge），后来合并 —— 
+三者订阅的本就是**同一条 `session/event` 事件流**，分开要付三份订阅开销。
 
 装好后自动注册进 DSH 的 web profile，不需要你手动改配置。
-
-**菜单里还有一条「安装配套插件…」** —— 那是给手动补装用的，会弹框告诉你结果。
+**升级时会自动摘掉旧的三个插件**，不会两套并存。
 
 ### 4. 余额与消耗监控
 
@@ -61,6 +64,16 @@
 
 **这部分不依赖 DSH 运行时** —— DSH 没开也能看余额。
 
+峰谷判断分三层降级：
+
+```
+系统日历（EventKit，判断「今天」）
+  ↓ 拿不到
+内置节假日表（2024–2026 官方快照）
+  ↓ 也没有
+周末兜底
+```
+
 ### 5. 桌面桌宠
 
 ```
@@ -69,7 +82,44 @@
 拖动  → 换位置；靠近屏幕边缘自动吸附并翻转朝向
 ```
 
+![余额气泡](docs/images/bubble-balance.png)
+
+气泡有两种：**余额**（带峰谷标记）和**每轮消耗**（带 token 数与时刻）。
+
+![消耗气泡](docs/images/bubble-turn.png)
+
 角色素材需要自备（原因见「素材」一节）。
+
+### 6. 通知与跳转
+
+```
+DSH 回复完 → 推一条系统通知（标题「小鲸鱼」）
+点通知本体 → 直接跳到 DSH 看那条对话
+在通知里回复 → 文本被注入回对话（走 DSH 官方 followup API）
+```
+
+### 7. 菜单结构
+
+菜单里有三个层级：
+
+```
+桌宠设置  ▸  大小 / 角色 / 气泡开关 / 吸附 / 音效
+高级设置  ▸  余额预警 / 预算 / 节假日源 / 更新检查
+分析…       打开用量窗口
+```
+
+### 8. 快捷键
+
+菜单展开时可用：
+
+| 键 | 动作 |
+|---|---|
+| ⌥1 | 安装配套插件 |
+| ⌥2 | 分析 |
+| ⌥3 | 启动 DSH GUI |
+| ⌥4 | 充值 / 查看用量 |
+| ⌥5 | 退出浮窗 |
+| ⌥6 | 退出 DSH |
 
 ---
 
@@ -80,7 +130,7 @@
 ```bash
 # 1. 下载 dmg（或从 Release 页面点下载）
 curl -L -o /tmp/WhaleFloat.dmg \
-  https://github.com/tigriyang/DeepSeek-Balance-Whale-Widget/releases/latest/download/WhaleFloat-0.1.1.dmg
+  https://github.com/tigriyang/DeepSeek-Balance-Whale-Widget/releases/latest/download/WhaleFloat-0.1.10.dmg
 
 # 2. 挂载并拷进应用程序目录
 hdiutil attach /tmp/WhaleFloat.dmg -nobrowse
@@ -93,6 +143,15 @@ open -a WhaleFloat
 
 **或者更简单**：双击 dmg，把「小鲸鱼」拖进「应用程序」。
 
+### ⚠️ 首次打开会被 Gatekeeper 拦
+
+这个应用**没有 Apple 开发者证书**，双击会提示「无法验证开发者」。
+
+**解决办法**：在「应用程序」里**右键点击 → 打开**，再点一次「打开」。
+之后就不会再拦了。
+
+（也可以去「系统设置 → 隐私与安全性」底部点「仍要打开」。）
+
 ### 方式二：交给 AI 全自动部署
 
 把下面这段整段复制给任意**有文件读写和命令执行能力**的 AI（Claude Code / Cursor / DSH 等）：
@@ -103,7 +162,7 @@ open -a WhaleFloat
 
 1. 下载最新安装包：
    curl -L -o /tmp/WhaleFloat.dmg \
-     https://github.com/tigriyang/DeepSeek-Balance-Whale-Widget/releases/latest/download/WhaleFloat-0.1.1.dmg
+     https://github.com/tigriyang/DeepSeek-Balance-Whale-Widget/releases/latest/download/WhaleFloat-0.1.10.dmg
 
 2. 挂载：hdiutil attach /tmp/WhaleFloat.dmg -nobrowse
    记下挂载点（通常是 /Volumes/小鲸鱼）
@@ -112,17 +171,20 @@ open -a WhaleFloat
 
 4. 卸载镜像并清理：hdiutil detach <挂载点>; rm -f /tmp/WhaleFloat.dmg
 
-5. 启动它：open -a WhaleFloat
-   （首次运行它会自己安装 launchd 自启配置，并静默装好三个配套插件）
+5. 去掉隔离属性（否则会提示「无法验证开发者」）：
+   xattr -dr com.apple.quarantine /Applications/WhaleFloat.app
 
-6. 验证：
+6. 启动它：open -a WhaleFloat
+   （首次运行它会自己安装 launchd 自启配置，并静默装好配套插件）
+
+7. 验证：
    · ps -axo command= | grep WhaleFloat  → 应有进程
    · 菜单栏应出现一个小鱼图标
    · ls ~/Library/LaunchAgents/ai.dsh.whalefloat.plist → 应存在
 
-7. 如果 DSH 尚未安装，提醒我，不要擅自安装。
+8. 如果 DSH 尚未安装，提醒我，不要擅自安装。
 
-注意：不要用 sudo，全程在用户目录下操作。
+注意：不要用 sudo（除了第 5 步可能需要的 xattr），全程在用户目录下操作。
 ````
 
 ### 卸载
@@ -132,6 +194,17 @@ bash uninstall.sh            # 清掉本体 + 自启 + 插件 + 设置 + 缓存�
 bash uninstall.sh --keep-data  # 想保留设置和导入的角色时才加参数
 ```
 
+也可以从菜单里点「卸载 WhaleFloat…」。
+
+### 命令行
+
+```bash
+open -a WhaleFloat --args --analysis   # 启动并直接打开用量窗口
+/Applications/WhaleFloat.app/Contents/MacOS/WhaleFloat --quit   # 让在跑的那份退出
+```
+
+`--quit` 走的是正常的 terminate 流程，设置和窗口位置会被保存。
+
 ---
 
 ## 三、架构与 fork 关系
@@ -139,20 +212,34 @@ bash uninstall.sh --keep-data  # 想保留设置和导入的角色时才加参�
 ### 组成
 
 ```
-WhaleFloat.app                Swift + AppKit 原生程序
-├── 启动器      内置 dsh-launcher.sh，负责起 DSH 并抓认证 URL
-├── 守护        launchd 配置（首次运行自动安装）
-├── 状态栏图标  菜单唯一入口
-├── 桌宠        NSWindow 浮窗，角色 + 气泡分层绘制
-└── docs/images 界面截图
+WhaleFloat.app                Swift 6 + AppKit 原生程序
+├── Main.swift            程序入口
+├── SingleInstance.swift  文件锁守卫
+├── App.swift             应用委托（生命周期、菜单动作、数据刷新）
+├── FloatWindow.swift     浮窗
+├── WhaleView.swift       角色 + 气泡的绘制与交互
+├── Menu.swift            菜单构建（系统 NSMenu）
+├── AppInfo.swift         常量与金额格式化
+├── DSHLauncher.swift     启动器
+├── ProcessManager.swift  进程管理
+├── Data.swift            余额请求与峰谷判断
+├── TurnCost.swift        账本读取
+├── WaitState.swift       等待状态读取
+├── NotifyBridge.swift    系统通知
+├── PluginInstaller.swift 插件安装
+├── HolidayCalendar.swift 节假日表
+├── SystemHoliday.swift   系统日历（EventKit）
+├── AnalysisWindow.swift  分析窗口
+├── SparkChartView.swift  折线图
+├── BubblePresenter.swift 气泡时序
+├── BubbleShapeView.swift 气泡形状
+└── TouchReaction.swift   摸摸头反应
 
 外部：
-├── dsh-wait-state     DSH 插件：上报「等回答 / 等授权」状态
-├── dsh-turn-usage     DSH 插件：采集每轮 token 与金额
-└── dsh-notify-bridge  DSH 插件：把回复推到系统通知，并接收通知里的回复
+└── dsh-whalefloat-helper  DSH 插件：等待状态 / 每轮消耗 / 系统通知
 ```
 
-**为什么需要那三个插件**：DSH 的事件只有它自己知道，
+**为什么需要那个插件**：DSH 的事件只有它自己知道，
 插件在 DSH 进程内监听后写成文件，本程序读文件 —— 两边解耦，
 DSH 没开时程序照常工作（只是少了实时数据）。
 
@@ -160,10 +247,15 @@ DSH 没开时程序照常工作（只是少了实时数据）。
 
 ```
 余额     WhaleFloat ──直连──▶ api.deepseek.com     （不经 DSH）
-峰谷     WhaleFloat ──本地计算──▶ 节假日表
+峰谷     WhaleFloat ──本地计算──▶ 节假日表 / 系统日历
 每轮消耗  DSH ──插件──▶ ~/.dsh/.whalefloat-usage.json ──▶ WhaleFloat
 等待状态  DSH ──插件──▶ ~/.dsh/.whalefloat-wait.json  ──▶ WhaleFloat
+通知      DSH ──插件──▶ ~/.dsh/.whalefloat-notify.json ──▶ 系统通知
+回复      系统通知 ──▶ ~/.dsh/.whalefloat-reply.json ──▶ DSH（followup）
 ```
+
+所有跨进程通信都是**文件**，没有 socket、没有 XPC —— 
+调试时 `cat` 一下就看得见。
 
 ### 与上游的关系
 
@@ -199,15 +291,31 @@ DSH 没开时程序照常工作（只是少了实时数据）。
 
 缺素材时程序仍可用 —— 退化为「仅状态栏图标」模式，功能一个不少。
 
+### 签名说明
+
+发布包用 **ad-hoc 签名**，没有 Apple 开发者证书。这意味着：
+
+```
+· 首次打开要右键 → 打开（见安装一节）
+· 系统无法验证「这是原版」，理论上可被篡改
+· 但权限（日历）只需授权一次 —— 分发的 app 不会重建，CDHash 固定
+```
+
+**本地开发**时构建脚本会用一张自签名证书（`setup-cert.sh` 可生成），
+那是为了让反复构建时 TCC 权限不被重置 —— 只对开发者有意义，
+对分发没有帮助（那张证书不在用户机器上）。
+
 ---
 
 ## 四、界面
 
-### 菜单面板
+### 菜单
 
 ![菜单](docs/images/menu.png)
 
-### 分析页
+**左键点图标** → 直接打开 DSH GUI；**右键** → 弹出这个菜单。
+
+### 分析窗口
 
 ![分析页](docs/images/analysis.png)
 

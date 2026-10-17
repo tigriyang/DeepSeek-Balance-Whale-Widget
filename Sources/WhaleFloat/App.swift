@@ -1,51 +1,6 @@
 import AppKit
 import Foundation
 
-/// 程序入口。
-///
-/// 形态：accessory（无 Dock 图标、无菜单栏主菜单）—— 它是个「挂在系统上的
-/// 小挂件」，不该占用 Dock 位置。
-@main
-enum WhaleFloatApp {
-    static func main() {
-        let app = NSApplication.shared
-        app.setActivationPolicy(.accessory)
-        let delegate = AppDelegate()
-        app.delegate = delegate
-        // 强引用住 delegate：NSApplication.delegate 是 weak 的
-        objc_setAssociatedObject(app, "whalefloat.delegate", delegate, .OBJC_ASSOCIATION_RETAIN)
-        app.run()
-    }
-}
-
-/// 单实例守卫。
-///
-/// 为什么必须要：首次运行会写 launchd 配置并 launchctl load -w，
-/// 而配置里 RunAtLoad=true —— 于是刚启动的这个进程会在同一时刻
-/// 被 launchd 又拉起来一份。结果就是两只鲸鱼完全重叠（肉眼看不出来），
-/// 通知还会重复推送。
-///
-/// 用文件锁而不是 NSRunningApplication 查询：后者依赖 bundle id，
-/// 而经 LaunchServices 启动时进程拿到的可能是临时标识，查不到。
-enum SingleInstance {
-    /// 持有 fd 才不会释放锁（close 即解锁）。只由主线程写入。
-    nonisolated(unsafe) private static var lockFD: Int32 = -1
-
-    static func acquire() -> Bool {
-        let path = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".dsh/.whalefloat.lock").path
-        let fd = open(path, O_CREAT | O_RDWR, 0o644)
-        // 连锁文件都开不了时不要拦 —— 宁可多开一份，也别让用户完全起不来
-        guard fd >= 0 else { return true }
-        if flock(fd, LOCK_EX | LOCK_NB) != 0 {
-            close(fd)
-            return false
-        }
-        lockFD = fd
-        return true
-    }
-}
-
 /// 应用委托：持有浮窗、菜单栏项、定时刷新。
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -57,6 +12,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var balanceRefreshTimer: Timer?
     private let client = BalanceClient()
     var settings = Settings.load()
+
+    /// 由命令行参数 --analysis 置位：启动完成后直接打开分析窗口。
+    var openAnalysisOnLaunch = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 单实例守卫必须放在最前面 —— 宁可什么都不做，也别多起一只鲸鱼。
@@ -86,6 +44,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         startRefreshLoop()
 
+        // --analysis：启动即开分析窗口（截图、脚本化演示都靠它）
+        if openAnalysisOnLaunch {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                self?.openLedger()
+            }
+        }
+
         // 日历访问：用于判断「今天是不是法定假日」。
         // 不是敏感权限（只读节假日标记，不读用户自己的日程），
         // 首次会弹一次系统授权框，拒绝也不影响其它功能。
@@ -108,6 +73,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // 插件随包发布，装上就好；弹模态框会阻塞主线程，
         // 自动化流程碰上它就卡住了。
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            // 先摘掉合并前的三个旧插件，再装新 helper ——
+            // 否则两套并存，事件会被处理两遍。
+            PluginInstaller.removeLegacy()
             PluginInstaller.installMissingQuietly()
         }
     }
@@ -654,7 +622,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for pid in ProcessManager.pids(matching: "dsh web") {
             kill(pid, SIGKILL)
         }
-        // ③ 交给启动器重新拉起（它会开浏览器）
+        // ③ 再等端口真的松开 —— 进程没了不等于端口没了，
+        //    差这一两秒就会撞 EADDRINUSE，表现成「DSH 起不来」。
+        let freed = await Task.detached {
+            ProcessManager.waitForPortFree(3080, timeout: 6.0)
+        }.value
+        if !freed {
+            NSLog("WhaleFloat: 重启 DSH 时 3080 仍被占用")
+        }
+        // ④ 交给启动器重新拉起（它会开浏览器）
         DSHLauncher.launch()
     }
 

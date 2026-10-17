@@ -50,7 +50,9 @@ enum TurnLedger {
     ///
     /// tick() 每秒调一次 load()，而账本有几十上百条事件 ——
     /// 每次都读盘再解析属于白烧 IO。用修改时间做判据即可。
+    /// 由 lock 保护 —— 读写都可能来自不同线程（tick、窗口刷新）。
     nonisolated(unsafe) private static var cache: (stamp: Date, ledger: Ledger?)?
+    private static let cacheLock = NSLock()
 
     /// 候选文件里最新的修改时间（作为缓存的判据）。没有文件时返回 distantPast。
     private static func newestStamp() -> Date {
@@ -68,7 +70,13 @@ enum TurnLedger {
     /// 避免新旧数据源切换的瞬间丢掉历史。
     static func load() -> Ledger? {
         let stamp = newestStamp()
-        if let c = cache, c.stamp == stamp { return c.ledger }
+        cacheLock.lock()
+        if let c = cache, c.stamp == stamp {
+            let hit = c.ledger
+            cacheLock.unlock()
+            return hit
+        }
+        cacheLock.unlock()
 
         var best: Ledger?
         for url in fileCandidates {
@@ -80,7 +88,9 @@ enum TurnLedger {
                 best = led
             }
         }
+        cacheLock.lock()
         cache = (stamp, best)
+        cacheLock.unlock()
         return best
     }
 
