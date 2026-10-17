@@ -24,7 +24,8 @@ VERSION="$(sed -n 's/.*static let version = "\(.*\)".*/\1/p' \
 OUT="$DIST/${APP_NAME}-${VERSION}.dmg"
 
 echo "▸ 先构建 app…"
-bash "$HERE/build-app.sh"
+# 打发布包时用 ad-hoc 签名（见 build-app.sh 里的说明）
+RELEASE=1 bash "$HERE/build-app.sh"
 
 APP="/Applications/${APP_NAME}.app"
 [ -d "$APP" ] || { echo "✗ 找不到 $APP"; exit 1; }

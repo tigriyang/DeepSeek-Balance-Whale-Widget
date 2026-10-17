@@ -114,22 +114,30 @@ cat > "$DEST/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-echo "▸ 本地签名（ad-hoc）…"
-# 签名。用固定的自签名证书「WhaleFloat Dev」，而不是 ad-hoc。
+# 签名策略：本地构建与发布包分开。
 #
-# 为什么：ad-hoc 签名没有身份，macOS 的 TCC 只能靠 CDHash 认人 ——
-# 每次构建重签就把 app 当成新的，日历等权限要重新授权。
-# 换成有身份的证书后，TCC 认的是证书，代码怎么改权限都保住。
+#   本地构建（默认）    用自签名证书「WhaleFloat Dev」
+#                       → TCC 认证书身份，反复构建也不会重置权限
+#   发布包（RELEASE=1） 用 ad-hoc
+#                       → 自签名证书不在用户机器上，分发出去反而多一层
+#                         「未知证书」的恐吓提示。反正都要右键打开，
+#                         ad-hoc 更干脆。
 #
-# 证书装法见仓库 README 或 /tmp/setup_cert.sh。没装则回退 ad-hoc。
+# 另一个事实：分发的 app 不会重建，CDHash 固定，权限本来就稳定 ——
+# 「权限反复要」只是开发期的现象。
 SIGN_ID="WhaleFloat Dev"
-if security find-identity -v -p codesigning 2>/dev/null | grep -q "$SIGN_ID"; then
+
+if [ "${RELEASE:-0}" = "1" ]; then
+    echo "▸ 签名（发布包：ad-hoc）…"
+    codesign --force --deep --sign - "$DEST" 2>&1 | tail -1 \
+        || echo "（签名跳过，本地运行不受影响）"
+elif security find-identity -v -p codesigning 2>/dev/null | grep -q "$SIGN_ID"; then
+    echo "▸ 签名（本地构建：$SIGN_ID）…"
     codesign --force --deep --sign "$SIGN_ID" "$DEST" 2>&1 | tail -1 \
         || echo "（签名失败，回退 ad-hoc）"
 else
-    echo "  未找到签名证书，回退 ad-hoc（日历权限会每次重问）"
+    echo "▸ 签名（未找到证书，回退 ad-hoc）…"
     codesign --force --deep --sign - "$DEST" 2>&1 | tail -1 \
         || echo "（签名跳过，本地运行不受影响）"
 fi
-echo "✓ 已安装：$DEST"
 echo "  运行：open "$DEST""
