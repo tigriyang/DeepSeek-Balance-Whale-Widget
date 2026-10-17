@@ -14,7 +14,12 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="WhaleFloat"
 BUNDLE_ID="ai.dsh.whalefloat"
-VERSION="0.1.0"
+# 版本号从源码读（AppInfo.version）。
+# 这里原先硬编码 "0.1.0" —— 源码改到 0.1.9 了，Info.plist 还是 0.1.0，
+# Finder 里看到的版本永远是旧的。
+VERSION="$(awk -F'"' '/static let version/ {print $2; exit}' \
+  "$HERE/Sources/WhaleFloat/Menu.swift" 2>/dev/null)"
+[ -z "$VERSION" ] && VERSION="0.1.0"
 # 装到系统的 /Applications —— Finder 侧边栏「应用程序」指向的是这里，
 # 装到 ~/Applications 的话在侧边栏里看不到，也不符合拖进「应用程序」的直觉。
 # 普通用户对 /Applications 有写权限，不需要 sudo。
@@ -109,7 +114,15 @@ cat > "$DEST/Contents/Info.plist" <<PLIST
 PLIST
 
 echo "▸ 本地签名（ad-hoc）…"
-codesign --force --deep --sign - "$DEST" 2>&1 | tail -1 || echo "（签名跳过，本地运行不受影响）"
+# 签名。**只在二进制真的变了才重签** ——
+# ad-hoc 签名没有身份，macOS 的 TCC 只能靠 CDHash 认人；
+# 每次构建都重签会让 CDHash 变化，系统就把 app 当成新的，
+# 日历等权限于是要重新授权一遍。
+if cmp -s "$BIN" "$DEST/Contents/MacOS/${APP_NAME}"; then
+    echo "  二进制未变，签名保持不变"
+else
+    codesign --force --deep --sign - "$DEST" 2>&1 | tail -1 || echo "（签名跳过，本地运行不受影响）"
+fi
 
 echo "✓ 已安装：$DEST"
 echo "  运行：open "$DEST""

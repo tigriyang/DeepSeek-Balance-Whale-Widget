@@ -34,15 +34,44 @@ enum SystemHoliday {
     nonisolated(unsafe) private static var authorized = false
     nonisolated(unsafe) private static var asked = false
 
-    /// 请求访问权限（只在首次调用时弹框）。
+    /// 确认访问权限。
+    ///
+    /// **先查已有授权状态，已授权就不再请求** ——
+    /// 之前每次启动都无脑调 requestFullAccessToEvents，系统哪怕已经允许过
+    /// 也可能再弹一次框（尤其是二进制重新签名之后）。
     static func requestAccessIfNeeded(completion: (@Sendable (Bool) -> Void)? = nil) {
         if asked { completion?(authorized); return }
         asked = true
-        let done: (Bool) -> Void = { ok in
+
+        let done: @Sendable (Bool) -> Void = { ok in
             authorized = ok
-            NSLog("WhaleFloat: 日历访问 \(ok ? "已允许" : "被拒绝")")
+            NSLog("WhaleFloat: 日历访问 \(ok ? "已允许" : "未获授权")")
             DispatchQueue.main.async { completion?(ok) }
         }
+
+        // 已有明确结论就直接用，不打扰用户
+        let status = EKEventStore.authorizationStatus(for: .event)
+        if #available(macOS 14.0, *) {
+            switch status {
+            case .fullAccess:
+                done(true); return
+            case .denied, .restricted, .writeOnly:
+                done(false); return
+            default:
+                break   // .notDetermined → 往下走，请求一次
+            }
+        } else {
+            switch status {
+            case .authorized:
+                done(true); return
+            case .denied, .restricted:
+                done(false); return
+            default:
+                break
+            }
+        }
+
+        // 只有「还没决定」时才弹框
         if #available(macOS 14.0, *) {
             store.requestFullAccessToEvents { granted, _ in done(granted) }
         } else {
