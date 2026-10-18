@@ -306,7 +306,7 @@ async function deliverReply(sc, sessions, sessionId, text) {
  * 不传 cwd 就用 DSH 的 defaultCwd —— 插件不知道用户的工作区在哪，
  * 也没必要猜。会话建好后立刻把首条消息投进去，DSH 就会开口。
  */
-async function startNewSession(sc, sessions, text) {
+async function startNewSession(sc, sessions, text, workspaces) {
 	// 这条链路牵涉 DSH 内部好几个服务，出错时宿主那边看不到任何提示。
 	// 落一份日志到 /tmp，用户报「点了没反应」时能直接看出卡在哪。
 	try {
@@ -314,7 +314,16 @@ async function startNewSession(sc, sessions, text) {
 		// 后者是内部的另一层（SessionController 上），没被 RPC 代理暴露，
 		// 调它会得到 "sc.createSession is not a function"。
 		// create 是业务命令层（SessionCommandController）的，返回 { sessionId, agentPreset }。
-		const created = await sc.create({});
+		//
+		// 传空对象 —— 刻意不指定 agentPreset，让 DSH 用用户自己在设置里选的那套。
+		// 传了就把会话钉在某个 preset 上，用户换了模型，新会话还是旧的。
+		//
+		// 要带 workspaceId：只给 cwd 的话会话能建出来，但没有工作区归属，
+		// 在 DSH 侧边栏里会落到「未分组」。工作区还会决定它在哪个分组、
+		// 以及能不能被那一组的文件上下文找到。
+		const list = workspaces?.list?.() ?? [];
+		const ws = list[0];
+		const created = ws ? await sc.create({ workspaceId: ws.id }) : await sc.create({});
 		const sid = String(created?.sessionId ?? "");
 		if (sid === "") throw new Error("create 没返回 sessionId");
 
@@ -338,7 +347,7 @@ function log(msg) {
 	}
 }
 
-function makeReplyPoller(ctx, sc, sessions) {
+function makeReplyPoller(ctx, sc, sessions, workspaces) {
 	let lastSeq = 0;
 	return setInterval(() => {
 		void (async () => {
@@ -353,7 +362,7 @@ function makeReplyPoller(ctx, sc, sessions) {
 
 				// newSession：不投给现有会话，而是开一个新的
 				if (box.newSession === true) {
-					const sid = await startNewSession(sc, sessions, text);
+					const sid = await startNewSession(sc, sessions, text, workspaces);
 					ctx.logger?.info?.(`whalefloat-helper: 已新建会话 ${sid}`);
 					return;
 				}
@@ -375,7 +384,7 @@ function apply(ctx) {
 	// 事件在 sessions 服务的 context 上发出 —— 必须先注入该服务再订阅，
 	// 直接在插件根 ctx 上订阅收不到。
 	// sessionController 用于把通知里的回复投回对话。
-	ctx.inject(["sessions", "sessionController"], (sctx) => {
+	ctx.inject(["sessions", "sessionController", "workspaceRegistry"], (sctx) => {
 		sctx.on("session/event", (session, event) => {
 			try {
 				wait.handle(event);
@@ -386,7 +395,7 @@ function apply(ctx) {
 			}
 		}, "whalefloat-helper: session events");
 
-		const timer = makeReplyPoller(ctx, sctx.sessionController, sctx.sessions);
+		const timer = makeReplyPoller(ctx, sctx.sessionController, sctx.sessions, sctx.workspaceRegistry);
 		sctx.effect(() => () => clearInterval(timer), "whalefloat-helper.reply-poll()");
 	});
 
