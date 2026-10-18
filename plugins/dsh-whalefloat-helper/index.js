@@ -212,7 +212,12 @@ const notify = {
 
 	handle(event, session) {
 		const type = String(event?.type ?? "");
-		const sid = session?.id ?? "default";
+		// 拿不到会话标识就不推。
+		// 推出去的通知里没 sessionId，用户点「回复」时无从路由 ——
+		// 要么静默失败，要么落到别的会话上，那才是真正的「串」。
+		// 宁可少一条通知，也不要推一条回不了的。
+		const sid = String(session?.id ?? "");
+		if (sid === "") return;
 
 		if (type === "session/title") {
 			const t = String(event?.data?.title ?? "").trim();
@@ -301,30 +306,85 @@ async function deliverReply(sc, sessions, sessionId, text) {
  * 不传 cwd 就用 DSH 的 defaultCwd —— 插件不知道用户的工作区在哪，
  * 也没必要猜。会话建好后立刻把首条消息投进去，DSH 就会开口。
  */
-async function startNewSession(sc, sessions, text) {
-	const created = await sc.createSession({});
-	const sid = created?.sessionId;
-	if (!sid) throw new Error("createSession 没返回 sessionId");
-	await deliverReply(sc, sessions, sid, text);
-	return sid;
+/// 上一次成功发起新会话的时刻，用于防抖。
+let lastNewSessionAt = 0;
+/// 同一时刻只允许一个在建。观察到过同一条回复被两个 poller 各处理一次，
+/// 结果是点一下建出两个会话 —— 除了游标，再加一道时间闸。
+const NEW_SESSION_DEBOUNCE_MS = 5000;
+
+async function startNewSession(sc, sessions, text, workspaces) {
+	// 这条链路牵涉 DSH 内部好几个服务，出错时宿主那边看不到任何提示。
+	// 落一份日志到 /tmp，用户报「点了没反应」时能直接看出卡在哪。
+	const now = Date.now();
+	if (now - lastNewSessionAt < NEW_SESSION_DEBOUNCE_MS) {
+		log("忽略 5 秒内的重复新会话请求");
+		return "";
+	}
+	lastNewSessionAt = now;
+	try {
+		// 方法名是 create，不是 createSession ——
+		// 后者是内部的另一层（SessionController 上），没被 RPC 代理暴露，
+		// 调它会得到 "sc.createSession is not a function"。
+		// create 是业务命令层（SessionCommandController）的，返回 { sessionId, agentPreset }。
+		//
+		// 传空对象 —— 刻意不指定 agentPreset，让 DSH 用用户自己在设置里选的那套。
+		// 传了就把会话钉在某个 preset 上，用户换了模型，新会话还是旧的。
+		//
+		// 要带 workspaceId：只给 cwd 的话会话能建出来，但没有工作区归属，
+		// 在 DSH 侧边栏里会落到「未分组」。工作区还会决定它在哪个分组、
+		// 以及能不能被那一组的文件上下文找到。
+		const list = workspaces?.list?.() ?? [];
+		log("workspaces 服务=" + (workspaces ? "有" : "无")
+			+ " 数量=" + list.length
+			+ (list.length ? " ids=" + list.map((w) => w.id).join(",") : ""));
+		const ws = list[0];
+		const created = ws ? await sc.create({ workspaceId: ws.id }) : await sc.create({});
+		const sid = String(created?.sessionId ?? "");
+		if (sid === "") throw new Error("create 没返回 sessionId");
+
+		// 会话建好后把首条投进去
+		await deliverReply(sc, sessions, sid, text);
+		log("新会话已投递 session=" + sid);
+		return sid;
+	} catch (err) {
+		log("startNewSession 失败: " + (err && err.message ? err.message : err));
+		throw err;
+	}
 }
 
-function makeReplyPoller(ctx, sc, sessions) {
-	let lastSeq = 0;
+/** 往 /tmp 追加一行诊断。失败就算了，不能因为写日志把宿主搞挂。 */
+function log(msg) {
+	try {
+		fs.appendFileSync("/tmp/whalefloat-helper.log",
+			new Date().toISOString() + " " + msg + "\n");
+	} catch {
+		/* 无妨 */
+	}
+}
+
+/// 已处理到哪一条回复。
+///
+/// **模块级**，不是 poller 内的局部变量 —— 之前放在函数里，
+/// 一旦插件被加载两次、两个 poller 各跑一个 700ms 循环，
+/// 它们互相看不见对方的进度，同一条回复会被各处理一遍：
+/// 点一次「新的对话」，建出两个会话。
+let replyCursor = 0;
+
+function makeReplyPoller(ctx, sc, sessions, workspaces) {
 	return setInterval(() => {
 		void (async () => {
 			try {
 				const box = readJSON(F.reply);
-				if (!box || typeof box.seq !== "number" || box.seq <= lastSeq) return;
+				if (!box || typeof box.seq !== "number" || box.seq <= replyCursor) return;
 				// 先推进游标，避免同一条被反复投递
-				lastSeq = box.seq;
+				replyCursor = box.seq;
 
 				const text = String(box.text ?? "").trim();
 				if (text === "") return;
 
 				// newSession：不投给现有会话，而是开一个新的
 				if (box.newSession === true) {
-					const sid = await startNewSession(sc, sessions, text);
+					const sid = await startNewSession(sc, sessions, text, workspaces);
 					ctx.logger?.info?.(`whalefloat-helper: 已新建会话 ${sid}`);
 					return;
 				}
@@ -342,11 +402,17 @@ function makeReplyPoller(ctx, sc, sessions) {
 
 // ── 装配 ───────────────────────────────────────────────────────────
 
+/// 记录 apply 被调了几次 —— 如果插件被加载两遍，这里会大于 1，
+/// 同时也会有两个 poller 在跑，同一条回复被处理两次。
+let applyCount = 0;
+
 function apply(ctx) {
+	applyCount += 1;
+	log("apply 第 " + applyCount + " 次被调用");
 	// 事件在 sessions 服务的 context 上发出 —— 必须先注入该服务再订阅，
 	// 直接在插件根 ctx 上订阅收不到。
 	// sessionController 用于把通知里的回复投回对话。
-	ctx.inject(["sessions", "sessionController"], (sctx) => {
+	ctx.inject(["sessions", "sessionController", "workspaceRegistry"], (sctx) => {
 		sctx.on("session/event", (session, event) => {
 			try {
 				wait.handle(event);
@@ -357,7 +423,8 @@ function apply(ctx) {
 			}
 		}, "whalefloat-helper: session events");
 
-		const timer = makeReplyPoller(ctx, sctx.sessionController, sctx.sessions);
+		log("poller 启动（第 " + applyCount + " 个）");
+		const timer = makeReplyPoller(ctx, sctx.sessionController, sctx.sessions, sctx.workspaceRegistry);
 		sctx.effect(() => () => clearInterval(timer), "whalefloat-helper.reply-poll()");
 	});
 

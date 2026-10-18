@@ -61,6 +61,37 @@ enum PluginInstaller {
         bundled.filter { !isInstalled($0) }
     }
 
+    /// 需要（重新）安装的插件：没装，或者装的那份与本版不同。
+    ///
+    /// 只看「有没有」是不够的 —— app 升级后包内的插件换了，
+    /// 而 ~/.dsh 里那份还是旧的，只要路径在就永远不会更新。
+    /// 表现就是：新功能明明做了，用户那边却「点了没反应」。
+    static func outdated() -> [String] {
+        bundled.filter { name in
+            guard let base = bundledDir else { return false }
+            let from = base.appendingPathComponent(name)
+            let to = pluginsDir.appendingPathComponent(name)
+            let fm = FileManager.default
+            guard fm.fileExists(atPath: to.path) else { return true }
+            return !sameContents(from, to, fm)
+        }
+    }
+
+    /// 两份插件目录内容是否一致（逐文件比字节）。
+    private static func sameContents(_ a: URL, _ b: URL, _ fm: FileManager) -> Bool {
+        guard let namesA = try? fm.contentsOfDirectory(atPath: a.path),
+              let namesB = try? fm.contentsOfDirectory(atPath: b.path),
+              Set(namesA) == Set(namesB)
+        else { return false }
+        for name in namesA {
+            guard let da = try? Data(contentsOf: a.appendingPathComponent(name)),
+                  let db = try? Data(contentsOf: b.appendingPathComponent(name)),
+                  da == db
+            else { return false }
+        }
+        return true
+    }
+
     /// 安装指定插件：从 app bundle 复制到 ~/.dsh/plugins/，再注册进 profile。
     /// 返回一段可直接展示的结果说明。
     static func install(_ names: [String]) -> String {
@@ -80,6 +111,22 @@ enum PluginInstaller {
                 try fm.createDirectory(at: pluginsDir, withIntermediateDirectories: true)
                 if fm.fileExists(atPath: to.path) { try fm.removeItem(at: to) }
                 try fm.copyItem(at: from, to: to)
+
+                // 还要更新 DSH profile 里的那份。
+                //
+                // profile 的 package.json 用 "file:..." 引用这个目录，
+                // pnpm 装的时候是**复制**而不是软链 —— 只改源目录，
+                // DSH 加载的还是旧副本。这个坑让「新功能点了没反应」
+                // 多绕了好几圈。
+                let homeDir = fm.homeDirectoryForCurrentUser
+                let profileCopy = homeDir
+                    .appendingPathComponent(".dsh/profiles/web/node_modules")
+                    .appendingPathComponent(name)
+                if fm.fileExists(atPath: profileCopy.path) {
+                    try? fm.removeItem(at: profileCopy)
+                    try? fm.copyItem(at: from, to: profileCopy)
+                }
+
                 copied.append(name)
             } catch {
                 failed.append("\(name)（\(error.localizedDescription)）")
@@ -236,7 +283,9 @@ enum PluginInstaller {
     /// 结果记进日志，菜单里也能看到状态。
     @discardableResult
     static func installMissingQuietly() -> String? {
-        let missing = self.missing()
+        // 用 outdated 而不是 missing：app 升级后包内的插件可能变了，
+        // 而 ~/.dsh 里那份还是旧的 —— 只看「装没装」永远不会更新它。
+        let missing = self.outdated()
         guard !missing.isEmpty else { return nil }
         let result = install(missing)
         NSLog("WhaleFloat: 自动安装插件 → \(result)")

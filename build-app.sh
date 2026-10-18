@@ -47,6 +47,14 @@ for ext in png gif mp3 wav icns; do
   done
 done
 
+# 彩蛋动画（HTML）。创意工坊会往 ~/.dsh/whalefloat-animations 放同名目录，
+# 用户目录优先于这里 —— 所以包内这份只是出厂默认。
+if [ -d "$HERE/Resources/animations" ]; then
+  rm -rf "$DEST/Contents/Resources/animations"
+  cp -R "$HERE/Resources/animations" "$DEST/Contents/Resources/animations"
+  echo "  内置动画：$(ls "$HERE/Resources/animations" | tr '\n' ' ')"
+fi
+
 # 内置法定节假日数据（官方发布，见 HolidayCalendar.swift）。
 # 随包放几年，离线也能用；联网后会自行更新到更新的年份。
 if [ -d "$HERE/Resources/holidays" ]; then

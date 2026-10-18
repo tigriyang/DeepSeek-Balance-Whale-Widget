@@ -16,6 +16,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 由命令行参数 --analysis 置位：启动完成后直接打开分析窗口。
     var openAnalysisOnLaunch = false
 
+    /// 由 --meal 置位：启动后立即冒一次吃饭泡，用于看效果。
+    var openMealOnLaunch = false
+
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 单实例守卫必须放在最前面 —— 宁可什么都不做，也别多起一只鲸鱼。
@@ -44,6 +47,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             NSLog("WhaleFloat: 未找到角色素材，以「仅状态栏」模式启动")
         }
         startRefreshLoop()
+
+        // --meal：启动即冒吃饭泡，不必等到 12:00 或 17:30
+        if openMealOnLaunch {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+                self?.presenter.show(.meal)
+            }
+        }
 
         // --analysis：启动即开分析窗口（截图、脚本化演示都靠它）
         if openAnalysisOnLaunch {
@@ -197,7 +207,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         floatWindow = win
         presenter = BubblePresenter(view: view)
-        presenter.onPresent = { [weak self] _ in self?.renderBubbleContent() }
+        presenter.onPresent = { [weak self] kind in
+            guard let self else { return }
+            // 吃饭泡的内容是固定的（一碗饭 + 干饭去），不走常规的文字渲染
+            if kind == .meal {
+                self.floatWindow?.whaleView.showMeal(animated: "hungry")
+                return
+            }
+            if kind == .snack {
+                self.floatWindow?.whaleView.showMeal(animated: "meal")
+                return
+            }
+            self.renderBubbleContent()
+        }
 
         // 启动时就把设置应用一遍 —— 否则视图自带的默认值会盖过配置文件，
         // 表现为「改了设置、重启后又变回去」。
@@ -435,6 +457,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settings.characterName = "custom"
         settings.save()
 
+        // 分辨率检查：桌宠最大画到 304 点，Retina 下要 608 像素。
+        // 图不够大时 100% 档会把像素拉开发虚 —— 提前说一声，
+        // 而不是等用户自己发现「怎么糊了」。
+        if let img = NSImage(contentsOf: src),
+           let rep = img.representations.first {
+            let px = rep.pixelsWide
+            if px < 304 {
+                alert("图片太小了",
+                      "这张图只有 \(px) 像素宽。两种档位都会放大，桌宠会明显发虚。建议 1024 像素以上。",
+                      style: .informational)
+            } else if px < 608 {
+                alert("图片偏小",
+                      "这张图 \(px) 像素宽。50% 档清晰，100% 档会轻微发虚。想要大尺寸，建议 1024 像素以上。",
+                      style: .informational)
+            }
+        }
+
         // 之前如果是「仅状态栏」模式，这时才把桌宠启用起来
         if floatWindow == nil {
             buildFloatWindow()
@@ -581,7 +620,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // 整个过程不弹任何框 —— 用户点这一下是想说话，不是想听进度。
         // 成功与否都有回音：成功了 DSH 会回一句并推通知，超时则明确告知。
         NSLog("WhaleFloat: 新的对话 —— DSH 未运行，先冷启动")
-        DSHLauncher.launch()
+        // 静默拉起：不开浏览器。这条路是让用户在通知里聊，
+        // 把网页拽到前台既打断人，又会停在旧会话上。
+        DSHLauncher.launch(openBrowser: false)
         waitForDSHReady(timeout: 120) { [weak self] ok in
             guard let self else { return }
             if ok {
@@ -641,31 +682,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let alert = NSAlert()
         alert.messageText = "卸载小鲸鱼？"
         alert.informativeText = """
-            会做三件事：
-              · 移除开机自启
-              · 从 DSH 里摘除配套插件
-              · 把应用移进废纸篓
+            会清掉这些东西，跟仓库里 uninstall.sh 的行为一致：
+              · 开机自启配置
+              · DSH 里的配套插件（含 profile 里那份副本）
+              · 应用本体
+              · 设置、导入的角色、账本与状态文件
+              · 缓存与日志
 
-            设置与账本会保留。要连这些一并清掉，请运行仓库里的 uninstall.sh。
+            想保留设置（换机重装用），改用 uninstall.sh --keep-data。
             """
-        alert.addButton(withTitle: "卸载")
+        alert.addButton(withTitle: "全部清掉")
         alert.addButton(withTitle: "取消")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
+        let fm = FileManager.default
+        let home = fm.homeDirectoryForCurrentUser
+
         // ① 自启
-        let plist = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/LaunchAgents/ai.dsh.whalefloat.plist")
+        let plist = home.appendingPathComponent("Library/LaunchAgents/ai.dsh.whalefloat.plist")
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
         p.arguments = ["unload", plist.path]
         try? p.run()
         p.waitUntilExit()
-        try? FileManager.default.removeItem(at: plist)
+        try? fm.removeItem(at: plist)
 
-        // ② 插件引用
+        // ② 插件引用与源码
         PluginInstaller.removeAllQuietly()
 
-        // ③ 本体进废纸篓
+        // ③ 设置、角色、账本与状态
+        //
+        // 原先这里什么都不删，跟 uninstall.sh 差了四类文件 ——
+        // 用户从菜单卸载完再重装，会带着上一次的设置和账本，
+        // 以为是新装的却还记着旧数据。
+        for path in [
+            ".dsh/whalefloat.json",
+            ".dsh/whalefloat-assets",
+            ".dsh/.whalefloat-usage.json",
+            ".dsh/.whalefloat-notify.json",
+            ".dsh/.whalefloat-wait.json",
+            ".dsh/.whalefloat-reply.json",
+        ] {
+            try? fm.removeItem(at: home.appendingPathComponent(path))
+        }
+
+        // ④ 缓存与偏好
+        for path in [
+            "Library/Caches/ai.dsh.whalefloat",
+            "Library/Preferences/ai.dsh.whalefloat.plist",
+            "Library/Saved Application State/ai.dsh.whalefloat.savedState",
+            "Library/HTTPStorages/ai.dsh.whalefloat",
+            "Library/WebKit/ai.dsh.whalefloat",
+        ] {
+            try? fm.removeItem(at: home.appendingPathComponent(path))
+        }
+        UserDefaults.standard.removePersistentDomain(forName: "ai.dsh.whalefloat")
+
+        // ⑤ 本体进废纸篓（最后一步：前面还要用 Bundle.main）
         let bundle = Bundle.main.bundleURL
         NSWorkspace.shared.recycle([bundle]) { _, _ in
             DispatchQueue.main.async { NSApp.terminate(nil) }
@@ -767,12 +840,97 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// 每秒的本地检查：倒计时 + 新轮次检测 + 等待状态。
+    /// 今天是否已经冒过某个饭点的泡（键形如 2026-10-18-lunch）。
+    private var lastMealSlot = ""
+
+    // MARK: - 偷吃白饭
+
+    /// 最后一次「有动静」的时刻。点桌宠、或 DSH 来了新对话都会刷新它。
+    private var lastActivityAt = Date()
+
+    /// 已经排好的偷吃时刻。nil 表示还没排（或刚被取消）。
+    private var snackScheduledAt: Date?
+
+    /// 静置多久之后开始惦记偷吃。排期也用这个长度。
+    private let snackIdle: TimeInterval = 30 * 60
+
+    /// 记一次活动。
+    ///
+    /// 唯一的判据是「DSH 有没有新东西推过来」—— 不看你有没有点它。
+    /// 一只宠物是因为主人一直没叫它才去翻碗柜的，不是因为你摸了它一下。
+    private func noteActivity() {
+        lastActivityAt = Date()
+        snackScheduledAt = nil
+    }
+
+    /// 静置够久就排一次偷吃，到点再演。
+    ///
+    /// 为什么要随机：固定时刻看着像定时任务。落在接下来半小时里的
+    /// 任意一点，才像它自己拿的主意。
+    private func checkSecretSnack() {
+        let idle = Date().timeIntervalSince(lastActivityAt)
+        guard idle >= snackIdle else {
+            snackScheduledAt = nil     // 还没闲够，之前排的作废
+            return
+        }
+
+        if let at = snackScheduledAt {
+            guard Date() >= at else { return }
+            snackScheduledAt = nil
+            lastActivityAt = Date()    // 吃完重新计时，免得紧接着又吃
+            guard floatWindow != nil else { return }
+            presenter.show(.snack)
+            NSLog("WhaleFloat: 偷吃一顿")
+            return
+        }
+
+        let delay = Double.random(in: 0...snackIdle)
+        snackScheduledAt = Date().addingTimeInterval(delay)
+        NSLog("WhaleFloat: 静置满 30 分钟，\(Int(delay / 60)) 分钟后偷吃")
+    }
+
+    /// 到点冒个「干饭」泡。
+    ///
+    /// 彩蛋不写进菜单、不做开关 —— 撞见才有意思。
+    /// 12:00 与 17:30 各一次，按天去重：同一饭点内反复 tick 只冒一次。
+    @discardableResult
+    private func checkMealTime() -> Bool {
+        let now = Date()
+        let comps = Calendar.current.dateComponents([.hour, .minute, .day, .month, .year], from: now)
+        guard let h = comps.hour, let m = comps.minute else { return false }
+
+        let slot: String
+        if h == 12 && m <= 1 {
+            slot = "lunch"
+        } else if h == 17 && m >= 29 && m <= 31 {
+            slot = "dinner"
+        } else {
+            return false
+        }
+
+        // 按天去重，避免这一分钟内每秒都冒一次
+        let key = "\(comps.year ?? 0)-\(comps.month ?? 0)-\(comps.day ?? 0)-\(slot)"
+        guard key != lastMealSlot else { return false }
+        lastMealSlot = key
+
+        guard floatWindow != nil else { return false }
+        presenter.show(.meal)
+        return true
+    }
+
     private func tick() {
         // ① DSH 等待用户交互（提问 / 授权）—— 优先级最高，独占气泡
         if checkWaitingState() { return }
 
-        // 底行含当前时间，需要每秒走；气泡可见时刷新它
-        if presenter.isVisible { renderBubbleContent() }
+        // 吃饭彩蛋：到点冒一次，冒的时候不刷新别的气泡
+        if checkMealTime() { return }
+
+        // 闲太久就偷吃：优先级低于饭点提醒，高于余额刷新
+        checkSecretSnack()
+
+        // 底行含当前时间，需要每秒走；气泡可见时刷新它。
+        // 吃饭泡的内容是固定的（一碗饭），别用余额文字把它刷掉。
+        if presenter.isVisible && presenter.kind != .meal { renderBubbleContent() }
 
         guard let ledger = TurnLedger.load() else { return }
         let latestTS = ledger.events?.map(\.ts).max() ?? 0
@@ -783,7 +941,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if latestTS > lastSeenTurnTS {
             lastSeenTurnTS = latestTS
-            // 一轮刚结束 → 冒泡显示本轮消耗
+            // 一轮刚结束 → 顺便记一次活动，并把排好的偷吃作废
+            noteActivity()
             presenter.show(.turn)
         }
     }

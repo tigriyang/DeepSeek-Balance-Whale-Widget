@@ -26,7 +26,7 @@ enum MenuBuilder {
             checked: target.floatWindow?.isVisible ?? false)
         pet.addItem(.separator())
         add(pet, "导入图片素材…", #selector(AppDelegate.importCharacter), target)
-        hint(pet, "角色立绘，透明背景 PNG 最佳")
+        hint(pet, "角色立绘，透明背景 PNG，建议 1024 像素以上")
         add(pet, "导入按下音效…", #selector(AppDelegate.importPressDownSound), target)
         hint(pet, "双击时按下的那一声，MP3 或 WAV")
         add(pet, "导入松开音效…", #selector(AppDelegate.importPressUpSound), target)

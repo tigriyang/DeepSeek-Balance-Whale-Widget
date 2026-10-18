@@ -170,7 +170,10 @@ final class NotifyBridge: NSObject, UNUserNotificationCenterDelegate {
         content.body = Self.plainText(from: body)
         content.categoryIdentifier = Self.categoryID
         content.sound = .default
+        // 会话标识必须带上 —— 用户点「回复」时靠它回到原会话。
+        // 日志里也打一份，方便对照「哪条通知、回给了哪个会话」。
         content.userInfo = ["sessionId": sessionId]
+        NSLog("WhaleFloat: 推送通知 session=\(sessionId) id=\(id)")
 
         let req = UNNotificationRequest(identifier: id, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(req) { err in
