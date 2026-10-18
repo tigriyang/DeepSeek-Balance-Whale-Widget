@@ -558,7 +558,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 菜单「卸载 WhaleFloat…」。
     ///
     /// 做三件事：卸自启、摘插件、把 app 本体移进废纸篓。
-    /// 设置与账本保留（重装后还能用），要一并清掉请跑 uninstall.sh --purge。
+    /// 设置与账本保留（重装后还能用）；要一并清掉请跑仓库里的 uninstall.sh。
     ///
     /// 为什么不只靠「拖进废纸篓」：那样 launchd 配置和 DSH 插件会留下来，
     /// 系统会一直尝试拉起一个不存在的程序。
@@ -572,7 +572,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
               · 从 DSH 里摘除配套插件
               · 把应用移进废纸篓
 
-            设置与账本会保留。要彻底清空请运行仓库里的 uninstall.sh --purge。
+            设置与账本会保留。要连这些一并清掉，请运行仓库里的 uninstall.sh。
             """
         alert.addButton(withTitle: "卸载")
         alert.addButton(withTitle: "取消")
