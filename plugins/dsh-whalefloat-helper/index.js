@@ -306,9 +306,21 @@ async function deliverReply(sc, sessions, sessionId, text) {
  * 不传 cwd 就用 DSH 的 defaultCwd —— 插件不知道用户的工作区在哪，
  * 也没必要猜。会话建好后立刻把首条消息投进去，DSH 就会开口。
  */
+/// 上一次成功发起新会话的时刻，用于防抖。
+let lastNewSessionAt = 0;
+/// 同一时刻只允许一个在建。观察到过同一条回复被两个 poller 各处理一次，
+/// 结果是点一下建出两个会话 —— 除了游标，再加一道时间闸。
+const NEW_SESSION_DEBOUNCE_MS = 5000;
+
 async function startNewSession(sc, sessions, text, workspaces) {
 	// 这条链路牵涉 DSH 内部好几个服务，出错时宿主那边看不到任何提示。
 	// 落一份日志到 /tmp，用户报「点了没反应」时能直接看出卡在哪。
+	const now = Date.now();
+	if (now - lastNewSessionAt < NEW_SESSION_DEBOUNCE_MS) {
+		log("忽略 5 秒内的重复新会话请求");
+		return "";
+	}
+	lastNewSessionAt = now;
 	try {
 		// 方法名是 create，不是 createSession ——
 		// 后者是内部的另一层（SessionController 上），没被 RPC 代理暴露，
@@ -322,6 +334,9 @@ async function startNewSession(sc, sessions, text, workspaces) {
 		// 在 DSH 侧边栏里会落到「未分组」。工作区还会决定它在哪个分组、
 		// 以及能不能被那一组的文件上下文找到。
 		const list = workspaces?.list?.() ?? [];
+		log("workspaces 服务=" + (workspaces ? "有" : "无")
+			+ " 数量=" + list.length
+			+ (list.length ? " ids=" + list.map((w) => w.id).join(",") : ""));
 		const ws = list[0];
 		const created = ws ? await sc.create({ workspaceId: ws.id }) : await sc.create({});
 		const sid = String(created?.sessionId ?? "");
@@ -380,7 +395,13 @@ function makeReplyPoller(ctx, sc, sessions, workspaces) {
 
 // ── 装配 ───────────────────────────────────────────────────────────
 
+/// 记录 apply 被调了几次 —— 如果插件被加载两遍，这里会大于 1，
+/// 同时也会有两个 poller 在跑，同一条回复被处理两次。
+let applyCount = 0;
+
 function apply(ctx) {
+	applyCount += 1;
+	log("apply 第 " + applyCount + " 次被调用");
 	// 事件在 sessions 服务的 context 上发出 —— 必须先注入该服务再订阅，
 	// 直接在插件根 ctx 上订阅收不到。
 	// sessionController 用于把通知里的回复投回对话。
@@ -395,6 +416,7 @@ function apply(ctx) {
 			}
 		}, "whalefloat-helper: session events");
 
+		log("poller 启动（第 " + applyCount + " 个）");
 		const timer = makeReplyPoller(ctx, sctx.sessionController, sctx.sessions, sctx.workspaceRegistry);
 		sctx.effect(() => () => clearInterval(timer), "whalefloat-helper.reply-poll()");
 	});
