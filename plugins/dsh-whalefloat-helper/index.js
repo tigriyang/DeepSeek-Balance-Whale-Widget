@@ -307,11 +307,36 @@ async function deliverReply(sc, sessions, sessionId, text) {
  * 也没必要猜。会话建好后立刻把首条消息投进去，DSH 就会开口。
  */
 async function startNewSession(sc, sessions, text) {
-	const created = await sc.createSession({});
-	const sid = created?.sessionId;
-	if (!sid) throw new Error("createSession 没返回 sessionId");
-	await deliverReply(sc, sessions, sid, text);
-	return sid;
+	// 这条链路牵涉 DSH 内部好几个服务，出错时宿主那边看不到任何提示。
+	// 落一份日志到 /tmp，用户报「点了没反应」时能直接看出卡在哪。
+	try {
+		// createSession 返回的是 { agent, agentPreset } —— 没有 sessionId 字段。
+		// 一开始按 { sessionId } 取，拿到 undefined 就抛异常，
+		// 表现成「点了没反应」。直接用返回的 agent 投递即可。
+		const created = await sc.createSession({});
+		const agent = created?.agent;
+		if (!agent) throw new Error("createSession 没返回 agent");
+
+		agent.followup(makeUserMessage(text));
+		await sessions?.flush?.(agent.session);
+
+		const sid = String(agent.id ?? agent.session?.id ?? "");
+		log("新会话已投递 session=" + sid);
+		return sid;
+	} catch (err) {
+		log("startNewSession 失败: " + (err && err.message ? err.message : err));
+		throw err;
+	}
+}
+
+/** 往 /tmp 追加一行诊断。失败就算了，不能因为写日志把宿主搞挂。 */
+function log(msg) {
+	try {
+		fs.appendFileSync("/tmp/whalefloat-helper.log",
+			new Date().toISOString() + " " + msg + "\n");
+	} catch {
+		/* 无妨 */
+	}
 }
 
 function makeReplyPoller(ctx, sc, sessions) {
