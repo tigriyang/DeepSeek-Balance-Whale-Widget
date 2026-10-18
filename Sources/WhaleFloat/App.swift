@@ -682,31 +682,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let alert = NSAlert()
         alert.messageText = "卸载小鲸鱼？"
         alert.informativeText = """
-            会做三件事：
-              · 移除开机自启
-              · 从 DSH 里摘除配套插件
-              · 把应用移进废纸篓
+            会清掉这些东西，跟仓库里 uninstall.sh 的行为一致：
+              · 开机自启配置
+              · DSH 里的配套插件（含 profile 里那份副本）
+              · 应用本体
+              · 设置、导入的角色、账本与状态文件
+              · 缓存与日志
 
-            设置与账本会保留。要连这些一并清掉，请运行仓库里的 uninstall.sh。
+            想保留设置（换机重装用），改用 uninstall.sh --keep-data。
             """
-        alert.addButton(withTitle: "卸载")
+        alert.addButton(withTitle: "全部清掉")
         alert.addButton(withTitle: "取消")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
+        let fm = FileManager.default
+        let home = fm.homeDirectoryForCurrentUser
+
         // ① 自启
-        let plist = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/LaunchAgents/ai.dsh.whalefloat.plist")
+        let plist = home.appendingPathComponent("Library/LaunchAgents/ai.dsh.whalefloat.plist")
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
         p.arguments = ["unload", plist.path]
         try? p.run()
         p.waitUntilExit()
-        try? FileManager.default.removeItem(at: plist)
+        try? fm.removeItem(at: plist)
 
-        // ② 插件引用
+        // ② 插件引用与源码
         PluginInstaller.removeAllQuietly()
 
-        // ③ 本体进废纸篓
+        // ③ 设置、角色、账本与状态
+        //
+        // 原先这里什么都不删，跟 uninstall.sh 差了四类文件 ——
+        // 用户从菜单卸载完再重装，会带着上一次的设置和账本，
+        // 以为是新装的却还记着旧数据。
+        for path in [
+            ".dsh/whalefloat.json",
+            ".dsh/whalefloat-assets",
+            ".dsh/.whalefloat-usage.json",
+            ".dsh/.whalefloat-notify.json",
+            ".dsh/.whalefloat-wait.json",
+            ".dsh/.whalefloat-reply.json",
+        ] {
+            try? fm.removeItem(at: home.appendingPathComponent(path))
+        }
+
+        // ④ 缓存与偏好
+        for path in [
+            "Library/Caches/ai.dsh.whalefloat",
+            "Library/Preferences/ai.dsh.whalefloat.plist",
+            "Library/Saved Application State/ai.dsh.whalefloat.savedState",
+            "Library/HTTPStorages/ai.dsh.whalefloat",
+            "Library/WebKit/ai.dsh.whalefloat",
+        ] {
+            try? fm.removeItem(at: home.appendingPathComponent(path))
+        }
+        UserDefaults.standard.removePersistentDomain(forName: "ai.dsh.whalefloat")
+
+        // ⑤ 本体进废纸篓（最后一步：前面还要用 Bundle.main）
         let bundle = Bundle.main.bundleURL
         NSWorkspace.shared.recycle([bundle]) { _, _ in
             DispatchQueue.main.async { NSApp.terminate(nil) }
