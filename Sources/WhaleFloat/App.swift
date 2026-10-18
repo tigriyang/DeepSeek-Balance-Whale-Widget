@@ -551,6 +551,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ExternalLinks.open(ExternalLinks.billing)
     }
 
+    /// 菜单「新的对话」：让 DSH 起一个新会话，首条发「你好」。
+    ///
+    /// 用户不必先打开网页 —— DSH 回完会走正常的通知链路，
+    /// 那一刻就能直接在通知里接着说了。
+    @objc func startNewConversation() {
+        guard DSHLauncher.isRunning else {
+            alert("DSH 没在跑",
+                  "「新的对话」需要 DSH 在后台运行。先点「启动 DSH GUI」，再回来。")
+            return
+        }
+        NotifyBridge.shared.beginNewSession()
+        alert("已发起新对话",
+              "等小鲸鱼回一句，通知就会到。之后可以直接在通知里回复。",
+              style: .informational)
+    }
+
+    /// 一个统一的小弹窗。走 NSAlert 而不是系统通知 ——
+    /// 用户刚点了菜单，视线就在这儿，弹窗比通知更近。
+    private func alert(_ title: String, _ body: String,
+                       style: NSAlert.Style = .warning) {
+        let a = NSAlert()
+        a.messageText = title
+        a.informativeText = body
+        a.alertStyle = style
+        a.runModal()
+    }
+
     @objc func launchDSH() {
         DSHLauncher.launch()
     }

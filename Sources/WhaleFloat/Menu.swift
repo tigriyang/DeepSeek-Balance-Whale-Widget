@@ -26,8 +26,11 @@ enum MenuBuilder {
             checked: target.floatWindow?.isVisible ?? false)
         pet.addItem(.separator())
         add(pet, "导入图片素材…", #selector(AppDelegate.importCharacter), target)
+        hint(pet, "角色立绘，透明背景 PNG 最佳")
         add(pet, "导入音效素材…", #selector(AppDelegate.importSound), target)
+        hint(pet, "双击时播放，MP3 或 WAV")
         add(pet, "获取仓库素材…", #selector(AppDelegate.openAssetSource), target)
+        hint(pet, "去上游页面挑，下载后放回素材目录")
         m.addItem(submenu("桌宠设置", pet))
 
         // ── 高级设置 ──
@@ -55,6 +58,7 @@ enum MenuBuilder {
         add(m, "分析…", #selector(AppDelegate.openLedger), target, key: "2")
         m.addItem(.separator())
         add(m, "启动 DSH GUI", #selector(AppDelegate.launchDSH), target, key: "3")
+        add(m, "新的对话", #selector(AppDelegate.startNewConversation), target)
         add(m, "充值 / 查看用量…", #selector(AppDelegate.openBilling), target, key: "4")
         m.addItem(.separator())
         add(m, "退出浮窗", #selector(AppDelegate.quit), target, key: "5")
@@ -75,6 +79,18 @@ enum MenuBuilder {
     }
 
     /// 一个带子菜单的顶层项。
+    /// 一行灰色说明，挂在某个操作项下面。
+    ///
+    /// 菜单项本身只能放一行字，说不清「这个槽位要什么文件」。
+    /// 用缩进的禁用项补一句：新用户第一次打开菜单就知道该准备什么，
+    /// 不用去翻文档。
+    private static func hint(_ m: NSMenu, _ text: String) {
+        let item = NSMenuItem(title: text, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        item.indentationLevel = 1
+        m.addItem(item)
+    }
+
     private static func submenu(_ title: String, _ menu: NSMenu) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         item.submenu = menu

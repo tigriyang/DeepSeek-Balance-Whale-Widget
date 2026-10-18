@@ -214,12 +214,36 @@ final class NotifyBridge: NSObject, UNUserNotificationCenterDelegate {
     }
 
     /// 把回复写回文件，DSH 侧插件轮询到后会注入对话。
-    private func writeReply(text: String, sessionId: String) {
-        replySeq += 1
+    /// 起一次新对话：给插件一条 text，让它建新会话再投进去。
+    ///
+    /// 首条用「你好」—— 它不是给用户看的，作用只是让 DSH 开口。
+    /// 等 DSH 回完，正常的通知链路就接上了，用户可以直接在通知里回。
+    func beginNewSession(text: String = "你好") {
+        writeReply(text: text, sessionId: "", newSession: true)
+    }
+
+    /// 下一个序号。
+    ///
+    /// 必须从文件里读现值 —— replySeq 是内存变量，程序重启归零，
+    /// 而插件那边记着上次处理到哪。若这里从 1 重新发，
+    /// 插件会认为「比处理过的还小」，直接丢弃，表现成回复没反应。
+    private func nextSeq() -> Int {
+        var onDisk = 0
+        if let data = try? Data(contentsOf: Self.replyFile),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let n = obj["seq"] as? Int {
+            onDisk = n
+        }
+        replySeq = max(replySeq, onDisk) + 1
+        return replySeq
+    }
+
+    private func writeReply(text: String, sessionId: String, newSession: Bool = false) {
         let payload: [String: Any] = [
-            "seq": replySeq,
+            "seq": nextSeq(),
             "text": text,
             "sessionId": sessionId,
+            "newSession": newSession,
             "ts": Date().timeIntervalSince1970 * 1000,
         ]
         do {
