@@ -236,14 +236,16 @@ final class WhaleView: NSView {
         stack.addArrangedSubview(usedLabel)
         stack.addArrangedSubview(valleyRow)   // 含「谷/峰」徽章与时间
 
-        // 吃饭彩蛋用：平时藏着
+        // 吃饭动画不放进气泡 —— 直接叠在角色身上居中。
+        // 放气泡里有两个麻烦：气泡要按内容撑尺寸、正方形动画还会被横排挤扁。
+        // 叠在角色中间反而更像「它在吃东西」。
         mealView.isHidden = true
-        stack.addArrangedSubview(mealView)
-        // NSStackView 不认 intrinsicContentSize，得用显式约束把它钉死，
-        // 否则 WKWebView 会一路撑满整个浮窗。
+        addSubview(mealView)
         mealView.translatesAutoresizingMaskIntoConstraints = false
-        // 尺寸随动画变：「想干饭」是横排（碗 + 字，约 2:1），
-        // 「吃白饭」是正方形。写死一个会把另一个拉变形。
+        NSLayoutConstraint.activate([
+            mealView.centerXAnchor.constraint(equalTo: centerXAnchor),
+            mealView.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
         let wc = mealView.widthAnchor.constraint(equalToConstant: 96)
         let hc = mealView.heightAnchor.constraint(equalToConstant: 49)
         NSLayoutConstraint.activate([wc, hc])
@@ -332,7 +334,7 @@ final class WhaleView: NSView {
         let maxW: CGFloat
         switch currentKind {
         case .meal:  maxW = bounds.width * 0.74   // 横排（碗 + 字），要宽
-        case .snack: maxW = 62                    // 正方形动画，收窄些免得碗显小
+        case .snack: maxW = 88                    // 正方形动画，留够空间给碗
         default:     maxW = bubbleWidth
         }
         if size.width > maxW {
@@ -654,21 +656,39 @@ final class WhaleView: NSView {
     ///
     /// 彩蛋不占菜单、不打扰流程，撞见才有意思。所以这里只负责把画面摆好，
     /// 什么时候该冒由 AppDelegate 按时间决定。
+    /// 收起吃饭动画。
+    func hideMeal() {
+        mealView.stop()
+        mealView.isHidden = true
+    }
+
     func showMeal(animated name: String = "hungry") {
         restoreBubbleLayout()
         // 每个动画的画布比例不同，容器跟着调
         let size: NSSize = (name == "hungry") ? NSSize(width: 96, height: 49)
-                                              : NSSize(width: 56, height: 56)
+                                              : NSSize(width: 76, height: 76)
         mealWidth?.constant = size.width
         mealHeight?.constant = size.height
-        titleLabel.stringValue = "想干饭"
         amountLabel.isHidden = true
         usedLabel.isHidden = true
         badgeRow?.isHidden = true
         mealView.isHidden = false
-        // 横排：碗在左，文字在右
-        stack.orientation = .horizontal
-        stack.spacing = 8
+
+        // 两个动画的排法不一样：
+        //   hungry —— 碗 +「想干饭」并排，靠文字传达「该吃饭了」
+        //   meal   —— 只有那碗饭，动画自己演全过程，旁边不该有字
+        // 之前一律按 hungry 排，播 meal 时旁边也挂着「想干饭」，
+        // 正方形动画还被挤在横排里，吃的过程全被挡了。
+        if name == "hungry" {
+            titleLabel.stringValue = "想干饭"
+            titleLabel.isHidden = false
+            stack.orientation = .horizontal
+            stack.spacing = 8
+        } else {
+            titleLabel.isHidden = true
+            stack.orientation = .vertical
+            stack.spacing = 0
+        }
         mealView.play(name)
         setBubbleVisible(true)
     }

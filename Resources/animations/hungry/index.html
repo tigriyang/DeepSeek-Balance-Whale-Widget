@@ -5,9 +5,12 @@
 <style>
   html, body { margin: 0; padding: 0; width: 100%; height: 100%;
                background: transparent; overflow: hidden; }
-  /* height: auto 让它按画布自身比例缩放。
-     写 height:100% 会把它硬拉到容器的比例，碗会被压成杯子。 */
-  canvas { display: block; width: 100%; height: auto; }
+  /* 比例锁死在 2:1（画布 180×92）。
+     height:100% 会按容器的比例硬拉，碗会被压成杯子；
+     光靠 height:auto 又依赖容器尺寸刚好对上。
+     显式写死 aspect-ratio，两边怎么变都不会变形。 */
+  canvas { display: block; width: 100%; height: auto;
+           aspect-ratio: 180 / 92; }
 </style>
 </head>
 <body>

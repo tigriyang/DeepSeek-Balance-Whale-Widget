@@ -16,8 +16,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 由命令行参数 --analysis 置位：启动完成后直接打开分析窗口。
     var openAnalysisOnLaunch = false
 
-    /// 由 --meal 置位：启动后立即冒一次吃饭泡，用于看效果。
+    /// 由 --meal 置位：启动后立即冒一次「想干饭」，用于看效果。
     var openMealOnLaunch = false
+
+    /// 由 --eat 置位：启动后立即演一次「偷吃白饭」。
+    var openSnackOnLaunch = false
 
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -48,10 +51,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         startRefreshLoop()
 
-        // --meal：启动即冒吃饭泡，不必等到 12:00 或 17:30
+        // --meal / --eat：启动即演示，不必等到饭点或闲够半小时
         if openMealOnLaunch {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
                 self?.presenter.show(.meal)
+            }
+        }
+        if openSnackOnLaunch {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+                self?.presenter.show(.snack)
             }
         }
 
@@ -930,7 +938,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // 底行含当前时间，需要每秒走；气泡可见时刷新它。
         // 吃饭泡的内容是固定的（一碗饭），别用余额文字把它刷掉。
-        if presenter.isVisible && presenter.kind != .meal { renderBubbleContent() }
+        // 吃饭/偷吃泡的内容是动画，别用余额文字把它刷掉
+        if presenter.isVisible,
+           presenter.kind != .meal,
+           presenter.kind != .snack {
+            renderBubbleContent()
+        }
 
         guard let ledger = TurnLedger.load() else { return }
         let latestTS = ledger.events?.map(\.ts).max() ?? 0
