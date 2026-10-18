@@ -581,7 +581,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // 整个过程不弹任何框 —— 用户点这一下是想说话，不是想听进度。
         // 成功与否都有回音：成功了 DSH 会回一句并推通知，超时则明确告知。
         NSLog("WhaleFloat: 新的对话 —— DSH 未运行，先冷启动")
-        DSHLauncher.launch()
+        // 静默拉起：不开浏览器。这条路是让用户在通知里聊，
+        // 把网页拽到前台既打断人，又会停在旧会话上。
+        DSHLauncher.launch(openBrowser: false)
         waitForDSHReady(timeout: 120) { [weak self] ok in
             guard let self else { return }
             if ok {

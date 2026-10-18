@@ -88,7 +88,13 @@ enum DSHLauncher {
         return url
     }
 
-    static func launch() {
+    /// 启动 DSH。
+    ///
+    /// - Parameter openBrowser: 是否顺带打开浏览器。
+    ///   菜单里的「启动 DSH GUI」要开；「新的对话」不要 ——
+    ///   那条路是让用户在通知里聊，把浏览器拽到前台反而打断他，
+    ///   而且浏览器会停在旧会话上，跟「新对话」的预期正好相反。
+    static func launch(openBrowser: Bool = true) {
         if let p = running, p.isRunning {
             notify("正在启动中…", "DSH 启动器已在运行，请稍候再试。")
             return
@@ -115,6 +121,10 @@ enum DSHLauncher {
         var env = ProcessInfo.processInfo.environment
         let home = env["HOME"] ?? ""
         env["PATH"] = "/usr/local/bin:/opt/homebrew/bin:\(home)/.npm-global/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        // 启动脚本认得这个变量：置 1 就只起服务、不开浏览器
+        if !openBrowser {
+            env["DSH_LAUNCHER_NO_OPEN"] = "1"
+        }
         p.environment = env
         p.standardInput = FileHandle.nullDevice
 

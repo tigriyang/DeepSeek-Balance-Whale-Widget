@@ -212,7 +212,12 @@ const notify = {
 
 	handle(event, session) {
 		const type = String(event?.type ?? "");
-		const sid = session?.id ?? "default";
+		// 拿不到会话标识就不推。
+		// 推出去的通知里没 sessionId，用户点「回复」时无从路由 ——
+		// 要么静默失败，要么落到别的会话上，那才是真正的「串」。
+		// 宁可少一条通知，也不要推一条回不了的。
+		const sid = String(session?.id ?? "");
+		if (sid === "") return;
 
 		if (type === "session/title") {
 			const t = String(event?.data?.title ?? "").trim();
