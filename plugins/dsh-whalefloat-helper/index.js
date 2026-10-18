@@ -362,15 +362,22 @@ function log(msg) {
 	}
 }
 
+/// 已处理到哪一条回复。
+///
+/// **模块级**，不是 poller 内的局部变量 —— 之前放在函数里，
+/// 一旦插件被加载两次、两个 poller 各跑一个 700ms 循环，
+/// 它们互相看不见对方的进度，同一条回复会被各处理一遍：
+/// 点一次「新的对话」，建出两个会话。
+let replyCursor = 0;
+
 function makeReplyPoller(ctx, sc, sessions, workspaces) {
-	let lastSeq = 0;
 	return setInterval(() => {
 		void (async () => {
 			try {
 				const box = readJSON(F.reply);
-				if (!box || typeof box.seq !== "number" || box.seq <= lastSeq) return;
+				if (!box || typeof box.seq !== "number" || box.seq <= replyCursor) return;
 				// 先推进游标，避免同一条被反复投递
-				lastSeq = box.seq;
+				replyCursor = box.seq;
 
 				const text = String(box.text ?? "").trim();
 				if (text === "") return;
