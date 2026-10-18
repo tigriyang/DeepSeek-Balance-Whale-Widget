@@ -50,9 +50,18 @@ hdiutil create \
   -ov -format UDZO \
   "$OUT" > /dev/null
 
+# 固定文件名的一份副本，供 README 里的安装链接使用。
+#
+# releases/latest/download/<name> 认的是「最新 release 里叫这个名字的资产」。
+# 若链接里带版本号，下个版本一发布它立刻 404 —— 而那是安装主路径。
+# 有了这份固定名，README 写 .../latest/download/WhaleFloat.dmg 就永久有效。
+STABLE="$DIST/${APP_NAME}.dmg"
+cp "$OUT" "$STABLE"
+
 echo ""
 echo "✓ 已生成：$OUT"
 echo "  大小：$(du -h "$OUT" | cut -f1)"
+echo "✓ 固定名副本：$STABLE（发版时一并上传，README 用它）"
 echo ""
 echo "  安装：双击打开，把「小鲸鱼」拖进「应用程序」"
 echo "  卸载：bash uninstall.sh"

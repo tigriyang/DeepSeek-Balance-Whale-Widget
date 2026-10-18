@@ -2,7 +2,7 @@
 # ------------------------------------------------------------------
 # WhaleFloat 打包脚本
 #
-# 把 SwiftPM 的可执行文件打成标准 macOS .app bundle，装到 ~/Applications。
+# 把 SwiftPM 的可执行文件打成标准 macOS .app bundle，装到 /Applications。
 #
 # 为什么要 .app 而不是裸可执行文件：
 #   · 系统把它当正式应用对待（Dock/通知/权限归属都正常）
@@ -60,8 +60,10 @@ fi
 cp "$HERE/ai.dsh.whalefloat.plist" "$DEST/Contents/Resources/launchagent.plist"
 
 # 内置 DSH 启动器 —— 「启动 DSH GUI」菜单要用。
-# 原先写死的是 ~/dsh-workspace/... 下的路径，换台机器必然找不到；
-# 随包带一份，运行时优先用包内的。
+#
+# 构建时从这份源码拷进包里；运行时优先用包内那份，找不到才回退到
+# 工作区路径（见 DSHLauncher.scriptPath）。所以这台开发机上路径写死没关系，
+# 打出来的包不依赖它 —— 换台机器照样能跑。
 LAUNCHER_SRC="$HOME/dsh-workspace/.dsh/skills/dsh-launcher/scripts/dsh-launcher.sh"
 if [ -f "$LAUNCHER_SRC" ]; then
   cp "$LAUNCHER_SRC" "$DEST/Contents/Resources/dsh-launcher.sh"

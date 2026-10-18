@@ -3,9 +3,10 @@
 # 彻底卸载小鲸鱼 —— 清掉它在本机留下的**一切痕迹**。
 #
 # 清理范围：
-#   1. 应用本体              ~/Applications/WhaleFloat.app
+#   1. 应用本体              /Applications/WhaleFloat.app（开发时可能是 ~/Applications）
 #   2. 开机自启              ~/Library/LaunchAgents/ai.dsh.whalefloat.plist
-#   3. DSH 插件（引用 + 源码）dsh-wait-state / dsh-turn-usage / dsh-notify-bridge
+#   3. DSH 插件（引用 + 源码）dsh-whalefloat-helper
+#      （外加合并前的三个旧名，给从旧版升级上来的机器做历史清理）
 #   4. 设置与数据            设置、导入的角色、账本、状态文件
 #   5. 系统级缓存与偏好      ~/Library 下按 bundle id 匹配的各目录
 #   6. 运行期日志            /tmp/whalefloat*.log
@@ -51,7 +52,10 @@ DSH=""
 for c in "$H/.npm-global/bin/dsh" "$H/.local/bin/dsh" /usr/local/bin/dsh /opt/homebrew/bin/dsh; do
   [ -x "$c" ] && { DSH="$c"; break; }
 done
-for p in dsh-wait-state dsh-turn-usage dsh-notify-bridge; do
+# 当前插件名 + 合并前的三个旧名。
+# 只列当前名的话，从旧版升级上来的机器会留下源码与 profile 注册，
+# 重装时与新的叠在一起。
+for p in dsh-whalefloat-helper dsh-wait-state dsh-turn-usage dsh-notify-bridge; do
   if [ -n "$DSH" ]; then
     "$DSH" plugin --profile web remove "$p" >/dev/null 2>&1 && say "  ✓ 已摘除引用 $p"
   fi
