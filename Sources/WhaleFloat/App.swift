@@ -16,6 +16,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 由命令行参数 --analysis 置位：启动完成后直接打开分析窗口。
     var openAnalysisOnLaunch = false
 
+    /// 由 --meal 置位：启动后立即冒一次吃饭泡，用于看效果。
+    var openMealOnLaunch = false
+
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 单实例守卫必须放在最前面 —— 宁可什么都不做，也别多起一只鲸鱼。
@@ -44,6 +47,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             NSLog("WhaleFloat: 未找到角色素材，以「仅状态栏」模式启动")
         }
         startRefreshLoop()
+
+        // --meal：启动即冒吃饭泡，不必等到 12:00 或 17:30
+        if openMealOnLaunch {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+                self?.presenter.show(.meal)
+            }
+        }
 
         // --analysis：启动即开分析窗口（截图、脚本化演示都靠它）
         if openAnalysisOnLaunch {
@@ -197,7 +207,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         floatWindow = win
         presenter = BubblePresenter(view: view)
-        presenter.onPresent = { [weak self] _ in self?.renderBubbleContent() }
+        presenter.onPresent = { [weak self] kind in
+            guard let self else { return }
+            // 吃饭泡的内容是固定的（一碗饭 + 干饭去），不走常规的文字渲染
+            if kind == .meal {
+                self.floatWindow?.whaleView.showMeal()
+                return
+            }
+            self.renderBubbleContent()
+        }
 
         // 启动时就把设置应用一遍 —— 否则视图自带的默认值会盖过配置文件，
         // 表现为「改了设置、重启后又变回去」。
@@ -434,6 +452,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         settings.characterName = "custom"
         settings.save()
+
+        // 分辨率检查：桌宠最大画到 304 点，Retina 下要 608 像素。
+        // 图不够大时 100% 档会把像素拉开发虚 —— 提前说一声，
+        // 而不是等用户自己发现「怎么糊了」。
+        if let img = NSImage(contentsOf: src),
+           let rep = img.representations.first {
+            let px = rep.pixelsWide
+            if px < 304 {
+                alert("图片太小了",
+                      "这张图只有 \(px) 像素宽。两种档位都会放大，桌宠会明显发虚。建议 1024 像素以上。",
+                      style: .informational)
+            } else if px < 608 {
+                alert("图片偏小",
+                      "这张图 \(px) 像素宽。50% 档清晰，100% 档会轻微发虚。想要大尺寸，建议 1024 像素以上。",
+                      style: .informational)
+            }
+        }
 
         // 之前如果是「仅状态栏」模式，这时才把桌宠启用起来
         if floatWindow == nil {
@@ -769,12 +804,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// 每秒的本地检查：倒计时 + 新轮次检测 + 等待状态。
+    /// 今天是否已经冒过某个饭点的泡（键形如 2026-10-18-lunch）。
+    private var lastMealSlot = ""
+
+    /// 到点冒个「干饭」泡。
+    ///
+    /// 彩蛋不写进菜单、不做开关 —— 撞见才有意思。
+    /// 12:00 与 17:30 各一次，按天去重：同一饭点内反复 tick 只冒一次。
+    @discardableResult
+    private func checkMealTime() -> Bool {
+        let now = Date()
+        let comps = Calendar.current.dateComponents([.hour, .minute, .day, .month, .year], from: now)
+        guard let h = comps.hour, let m = comps.minute else { return false }
+
+        let slot: String
+        if h == 12 && m <= 1 {
+            slot = "lunch"
+        } else if h == 17 && m >= 29 && m <= 31 {
+            slot = "dinner"
+        } else {
+            return false
+        }
+
+        // 按天去重，避免这一分钟内每秒都冒一次
+        let key = "\(comps.year ?? 0)-\(comps.month ?? 0)-\(comps.day ?? 0)-\(slot)"
+        guard key != lastMealSlot else { return false }
+        lastMealSlot = key
+
+        guard floatWindow != nil else { return false }
+        presenter.show(.meal)
+        return true
+    }
+
     private func tick() {
         // ① DSH 等待用户交互（提问 / 授权）—— 优先级最高，独占气泡
         if checkWaitingState() { return }
 
-        // 底行含当前时间，需要每秒走；气泡可见时刷新它
-        if presenter.isVisible { renderBubbleContent() }
+        // 吃饭彩蛋：到点冒一次，冒的时候不刷新别的气泡
+        if checkMealTime() { return }
+
+        // 底行含当前时间，需要每秒走；气泡可见时刷新它。
+        // 吃饭泡的内容是固定的（一碗饭），别用余额文字把它刷掉。
+        if presenter.isVisible && presenter.kind != .meal { renderBubbleContent() }
 
         guard let ledger = TurnLedger.load() else { return }
         let latestTS = ledger.events?.map(\.ts).max() ?? 0

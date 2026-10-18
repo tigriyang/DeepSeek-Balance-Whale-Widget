@@ -69,6 +69,8 @@ final class WhaleView: NSView {
     nonisolated static let defaultRoleFile = "role-clean.png"
     /// 气泡形状层（独立绘制，不属于角色图）。
     private let bubbleShape = BubbleShapeView()
+    /// 「干饭」彩蛋里那碗饭。平时叠在栈里但隐藏。
+    private let bowlView = BowlView()
     private let stack = NSStackView()
     /// 摸摸头：点击时的动画与音效。
     private var touch: TouchReaction?
@@ -231,6 +233,10 @@ final class WhaleView: NSView {
         stack.addArrangedSubview(usedLabel)
         stack.addArrangedSubview(valleyRow)   // 含「谷/峰」徽章与时间
 
+        // 吃饭彩蛋用：平时藏着
+        bowlView.isHidden = true
+        stack.addArrangedSubview(bowlView)
+
         // 栈宽不超过气泡内宽 —— 手动布局下这里只用于 initial fittingSize，
         // 真正的宽度在 positionBubbleStack 里夹取。
         // 栈宽锁定在气泡内宽 —— 超出的行会被压缩而不是撑破气泡
@@ -306,8 +312,11 @@ final class WhaleView: NSView {
     private func positionBubbleStack() {
         stack.layoutSubtreeIfNeeded()
         var size = stack.fittingSize
-        // 夹到气泡内宽，避免长行顶出泡泡
-        let maxW = bubbleWidth
+        // 夹到气泡内宽，避免长行顶出泡泡。
+        //
+        // 吃饭泡例外：它是横排（碗 + 文字），高度只有一行，
+        // 照椭圆高度反推出来的内宽装不下「碗 + 想干饭」，会被夹成一个字。
+        let maxW: CGFloat = currentKind == .meal ? bounds.width * 0.74 : bubbleWidth
         if size.width > maxW {
             stack.setFrameSize(NSSize(width: maxW, height: size.height))
             stack.layoutSubtreeIfNeeded()
@@ -486,6 +495,14 @@ final class WhaleView: NSView {
             usedLabel.isHidden = true
             badgeRow.isHidden = true
             lastTurnLabel.isHidden = true
+        case .meal:
+            // 吃饭视图：只有一碗饭和一句「干饭去」，其余全藏。
+            // 具体摆位在 showMeal() 里做，这里只负责把行隐藏掉。
+            titleLabel.isHidden = false
+            amountLabel.isHidden = true
+            usedLabel.isHidden = true
+            badgeRow.isHidden = true
+            lastTurnLabel.isHidden = true
         }
         needsLayout = true
     }
@@ -615,6 +632,44 @@ final class WhaleView: NSView {
     /// 分层之后逻辑很直接：气泡 = **形状层 + 文字层**，两者一起淡入淡出，
     /// 角色层完全不受影响 —— 这正是原作的做法（气泡由 SVG 画，与角色图无关）。
     /// 早先从合成图里抠气泡时，才会遇到「背景先没了、文字还在淡出」这类错序。
+    /// 冒个「干饭」泡：气泡里换成一碗饭加一句「干饭去」，饭在嚼。
+    ///
+    /// 彩蛋不占菜单、不打扰流程，撞见才有意思。所以这里只负责把画面摆好，
+    /// 什么时候该冒由 AppDelegate 按时间决定。
+    func showMeal() {
+        restoreBubbleLayout()
+        titleLabel.stringValue = "想干饭"
+        amountLabel.isHidden = true
+        usedLabel.isHidden = true
+        badgeRow?.isHidden = true
+        bowlView.isHidden = false
+        // 横排：碗在左，文字在右
+        stack.orientation = .horizontal
+        stack.spacing = 8
+        bowlView.startChewing()
+        setBubbleVisible(true)
+    }
+
+    /// 把气泡恢复成「竖排四行」的常规样子。
+    ///
+    /// 吃饭彩蛋把栈改成了横排、藏了几行，下一次冒普通泡之前必须还原，
+    /// 否则余额泡会长成一只碗加一个数字。
+    private func restoreBubbleLayout() {
+        bowlView.stopChewing()
+        bowlView.isHidden = true
+        amountLabel.isHidden = false
+        usedLabel.isHidden = false
+        badgeRow?.isHidden = false
+        stack.orientation = .vertical
+        stack.spacing = 1
+    }
+
+    /// 收起吃饭泡时调用，确保下次布局是干净的。
+    func endMealIfNeeded() {
+        guard !bowlView.isHidden else { return }
+        restoreBubbleLayout()
+    }
+
     func setBubbleVisible(_ visible: Bool, animated: Bool = true) {
         guard bubbleVisible != visible || stack.alphaValue != (visible ? 1 : 0) else { return }
         bubbleVisible = visible
@@ -636,10 +691,13 @@ final class WhaleView: NSView {
             stack.alphaValue = target
         }
         if !visible {
-            // 完全透明后彻底藏起来，省得它继续吃事件
+            // 完全透明后彻底藏起来，省得它继续吃事件；
+            // 顺便把吃饭彩蛋改过的布局还原 —— 碗必须跟着文字一起走，
+            // 否则泡收了，碗还挂在头顶上。
             DispatchQueue.main.asyncAfter(deadline: .now() + fadeSeconds + 0.05) { [weak self] in
                 guard let self, !self.bubbleVisible else { return }
                 self.bubbleShape.isHidden = true
+                self.restoreBubbleLayout()
             }
         }
     }

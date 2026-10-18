@@ -8,6 +8,7 @@ import Foundation
 ///
 /// 支持的命令行参数：
 ///   --analysis    启动后直接打开分析窗口（不弹在其他窗口前面）
+///   --meal        启动后立即冒一次「干饭」泡（看效果用，不必等到饭点）
 ///   --quit        把正在跑的那一份关掉
 @main
 enum WhaleFloatApp {
@@ -25,6 +26,7 @@ enum WhaleFloatApp {
         // 强引用住 delegate：NSApplication.delegate 是 weak 的
         objc_setAssociatedObject(app, "whalefloat.delegate", delegate, .OBJC_ASSOCIATION_RETAIN)
         delegate.openAnalysisOnLaunch = args.contains("--analysis")
+        delegate.openMealOnLaunch = args.contains("--meal")
         app.run()
     }
 
