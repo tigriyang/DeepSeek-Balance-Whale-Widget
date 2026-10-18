@@ -211,7 +211,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard let self else { return }
             // 吃饭泡的内容是固定的（一碗饭 + 干饭去），不走常规的文字渲染
             if kind == .meal {
-                self.floatWindow?.whaleView.showMeal()
+                self.floatWindow?.whaleView.showMeal(animated: "hungry")
+                return
+            }
+            if kind == .snack {
+                self.floatWindow?.whaleView.showMeal(animated: "meal")
                 return
             }
             self.renderBubbleContent()
@@ -807,6 +811,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 今天是否已经冒过某个饭点的泡（键形如 2026-10-18-lunch）。
     private var lastMealSlot = ""
 
+    // MARK: - 偷吃白饭
+
+    /// 最后一次「有动静」的时刻。点桌宠、或 DSH 来了新对话都会刷新它。
+    private var lastActivityAt = Date()
+
+    /// 已经排好的偷吃时刻。nil 表示还没排（或刚被取消）。
+    private var snackScheduledAt: Date?
+
+    /// 静置多久之后开始惦记偷吃。排期也用这个长度。
+    private let snackIdle: TimeInterval = 30 * 60
+
+    /// 记一次活动。
+    ///
+    /// 唯一的判据是「DSH 有没有新东西推过来」—— 不看你有没有点它。
+    /// 一只宠物是因为主人一直没叫它才去翻碗柜的，不是因为你摸了它一下。
+    private func noteActivity() {
+        lastActivityAt = Date()
+        snackScheduledAt = nil
+    }
+
+    /// 静置够久就排一次偷吃，到点再演。
+    ///
+    /// 为什么要随机：固定时刻看着像定时任务。落在接下来半小时里的
+    /// 任意一点，才像它自己拿的主意。
+    private func checkSecretSnack() {
+        let idle = Date().timeIntervalSince(lastActivityAt)
+        guard idle >= snackIdle else {
+            snackScheduledAt = nil     // 还没闲够，之前排的作废
+            return
+        }
+
+        if let at = snackScheduledAt {
+            guard Date() >= at else { return }
+            snackScheduledAt = nil
+            lastActivityAt = Date()    // 吃完重新计时，免得紧接着又吃
+            guard floatWindow != nil else { return }
+            presenter.show(.snack)
+            NSLog("WhaleFloat: 偷吃一顿")
+            return
+        }
+
+        let delay = Double.random(in: 0...snackIdle)
+        snackScheduledAt = Date().addingTimeInterval(delay)
+        NSLog("WhaleFloat: 静置满 30 分钟，\(Int(delay / 60)) 分钟后偷吃")
+    }
+
     /// 到点冒个「干饭」泡。
     ///
     /// 彩蛋不写进菜单、不做开关 —— 撞见才有意思。
@@ -843,6 +893,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // 吃饭彩蛋：到点冒一次，冒的时候不刷新别的气泡
         if checkMealTime() { return }
 
+        // 闲太久就偷吃：优先级低于饭点提醒，高于余额刷新
+        checkSecretSnack()
+
         // 底行含当前时间，需要每秒走；气泡可见时刷新它。
         // 吃饭泡的内容是固定的（一碗饭），别用余额文字把它刷掉。
         if presenter.isVisible && presenter.kind != .meal { renderBubbleContent() }
@@ -856,7 +909,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if latestTS > lastSeenTurnTS {
             lastSeenTurnTS = latestTS
-            // 一轮刚结束 → 冒泡显示本轮消耗
+            // 一轮刚结束 → 顺便记一次活动，并把排好的偷吃作废
+            noteActivity()
             presenter.show(.turn)
         }
     }

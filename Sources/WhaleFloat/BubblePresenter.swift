@@ -12,7 +12,8 @@ enum BubbleKind {
     case turn             // 本轮消耗
     case alert            // 提醒（余额预警 / 超预算）
     case waiting          // DSH 正在等用户回答 / 授权
-    case meal             // 吃饭彩蛋（碗 + 咀嚼动画）
+    case meal             // 饭点提醒（「想干饭」，碗轻轻晃）
+    case snack            // 偷吃白饭（碗从满到空，最后打嗝）
 
     var autoHideSeconds: TimeInterval {
         switch self {
@@ -21,7 +22,8 @@ enum BubbleKind {
         case .balance, .turn: return 10
         case .alert: return 15   // 提醒多看一会儿
         case .waiting: return 0  // 等待状态由事件解除，不靠计时
-        case .meal: return 6     // 吃完就收，别赖着
+        case .meal: return 6     // 饭点提醒看一眼就够
+        case .snack: return 8    // 偷吃要演完：吃、见底、打嗝
         }
     }
 }

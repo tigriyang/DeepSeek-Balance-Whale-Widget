@@ -72,6 +72,8 @@ final class WhaleView: NSView {
     /// 「干饭」彩蛋的动画。是一个 WKWebView，内容来自
     /// Resources/animations/meal/index.html —— 可被用户目录里的同名动画覆盖。
     private let mealView = AnimationHost()
+    private var mealWidth: NSLayoutConstraint?
+    private var mealHeight: NSLayoutConstraint?
     private let stack = NSStackView()
     /// 摸摸头：点击时的动画与音效。
     private var touch: TouchReaction?
@@ -240,11 +242,13 @@ final class WhaleView: NSView {
         // NSStackView 不认 intrinsicContentSize，得用显式约束把它钉死，
         // 否则 WKWebView 会一路撑满整个浮窗。
         mealView.translatesAutoresizingMaskIntoConstraints = false
-        // 「想干饭」是横排画面（碗 + 字），180:92 大约 2:1
-        NSLayoutConstraint.activate([
-            mealView.widthAnchor.constraint(equalToConstant: 96),
-            mealView.heightAnchor.constraint(equalToConstant: 49),
-        ])
+        // 尺寸随动画变：「想干饭」是横排（碗 + 字，约 2:1），
+        // 「吃白饭」是正方形。写死一个会把另一个拉变形。
+        let wc = mealView.widthAnchor.constraint(equalToConstant: 96)
+        let hc = mealView.heightAnchor.constraint(equalToConstant: 49)
+        NSLayoutConstraint.activate([wc, hc])
+        mealWidth = wc
+        mealHeight = hc
 
         // 栈宽不超过气泡内宽 —— 手动布局下这里只用于 initial fittingSize，
         // 真正的宽度在 positionBubbleStack 里夹取。
@@ -325,7 +329,12 @@ final class WhaleView: NSView {
         //
         // 吃饭泡例外：它是横排（碗 + 文字），高度只有一行，
         // 照椭圆高度反推出来的内宽装不下「碗 + 想干饭」，会被夹成一个字。
-        let maxW: CGFloat = currentKind == .meal ? bounds.width * 0.74 : bubbleWidth
+        let maxW: CGFloat
+        switch currentKind {
+        case .meal:  maxW = bounds.width * 0.74   // 横排（碗 + 字），要宽
+        case .snack: maxW = 62                    // 正方形动画，收窄些免得碗显小
+        default:     maxW = bubbleWidth
+        }
         if size.width > maxW {
             stack.setFrameSize(NSSize(width: maxW, height: size.height))
             stack.layoutSubtreeIfNeeded()
@@ -504,9 +513,9 @@ final class WhaleView: NSView {
             usedLabel.isHidden = true
             badgeRow.isHidden = true
             lastTurnLabel.isHidden = true
-        case .meal:
-            // 吃饭视图：只有一碗饭和一句「干饭去」，其余全藏。
-            // 具体摆位在 showMeal() 里做，这里只负责把行隐藏掉。
+        case .meal, .snack:
+            // 吃饭视图：只有动画和一句提示，其余全藏。
+            // 具体播哪个动画在 showMeal(animated:) 里决定。
             titleLabel.isHidden = false
             amountLabel.isHidden = true
             usedLabel.isHidden = true
@@ -645,8 +654,13 @@ final class WhaleView: NSView {
     ///
     /// 彩蛋不占菜单、不打扰流程，撞见才有意思。所以这里只负责把画面摆好，
     /// 什么时候该冒由 AppDelegate 按时间决定。
-    func showMeal() {
+    func showMeal(animated name: String = "hungry") {
         restoreBubbleLayout()
+        // 每个动画的画布比例不同，容器跟着调
+        let size: NSSize = (name == "hungry") ? NSSize(width: 96, height: 49)
+                                              : NSSize(width: 56, height: 56)
+        mealWidth?.constant = size.width
+        mealHeight?.constant = size.height
         titleLabel.stringValue = "想干饭"
         amountLabel.isHidden = true
         usedLabel.isHidden = true
@@ -655,7 +669,7 @@ final class WhaleView: NSView {
         // 横排：碗在左，文字在右
         stack.orientation = .horizontal
         stack.spacing = 8
-        mealView.play("hungry")
+        mealView.play(name)
         setBubbleVisible(true)
     }
 
