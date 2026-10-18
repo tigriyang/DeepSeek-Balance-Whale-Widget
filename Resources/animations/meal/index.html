@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<style>
+  /* 画布按 200×200 绘制，但显示尺寸跟着容器走 ——
+     WKWebView 会给它 40×40 点，直接 1:1 只露出左上角。 */
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%;
+               background: transparent; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="frame" width="200" height="200"></canvas>
+<script>
+// 一碗饭：从满到空，吃完打个嗝。演完就停在空碗上，不循环。
+//
+// 循环播放会让「从多到少」反复重来，看着像在无限吃 —— 吓人。
+// 彩蛋就该一次性演完，停在结局。
+//
+// 坐标：canvas 原点左上、y 向下，所以上方是负 y。
+const INK = '#2B3A67';
+const c = document.getElementById('frame');
+const ctx = c.getContext('2d');
+
+const W = 200, H = 200;
+const BOWL_W = 62, BOWL_H = 38;
+const CX = W / 2, CY = H * 0.60;
+const RIM_Y = -BOWL_H * 0.46;
+const BOT_Y = BOWL_H * 0.50;
+const RX = BOWL_W / 2;
+const RY = BOWL_H * 0.22;
+
+// 时间轴（秒）
+const T_CHEW_START = 0.6;
+const T_CHEW_END   = 2.2;
+const T_EMPTY      = 2.8;
+const T_BURP       = 3.1;
+const T_END        = 4.2;
+
+function clamp01(v) { return Math.max(0, Math.min(1, v)); }
+function easeInOut(t) { return t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2) / 2; }
+
+// 咀嚼：三下来回，只在区间内
+function bowlShift(t) {
+  if (t < T_CHEW_START || t > T_CHEW_END) return 0;
+  const k = (t - T_CHEW_START) / (T_CHEW_END - T_CHEW_START);
+  return Math.sin(k * Math.PI * 6) * 4.5;
+}
+
+// 打嗝：整个碗往上一弹再落下
+function burpLift(t) {
+  if (t < T_BURP || t > T_BURP + 0.5) return 0;
+  const k = (t - T_BURP) / 0.5;
+  return -Math.sin(k * Math.PI) * 5;
+}
+
+// 饭量：咀嚼时稳步减少，到 T_EMPTY 见底
+function riceAmount(t) {
+  if (t <= T_CHEW_START) return 1;
+  if (t >= T_EMPTY) return 0;
+  const k = (t - T_CHEW_START) / (T_EMPTY - T_CHEW_START);
+  return 1 - easeInOut(k);
+}
+
+const CRUMB_SEEDS = [
+  { at: 0.75, vx: 62, vy: -58, r: 2.6 },
+  { at: 1.05, vx: 78, vy: -44, r: 2.2 },
+  { at: 1.35, vx: 54, vy: -50, r: 2.4 },
+  { at: 1.65, vx: 88, vy: -32, r: 2.0 },
+  { at: 1.95, vx: 46, vy: -40, r: 2.1 },
+];
+
+function drawSteam(t) {
+  // 热气只在前半段，吃起来就散了
+  const a = t < T_CHEW_END ? clamp01(1 - t / T_CHEW_END) : 0;
+  if (a <= 0.01) return;
+  ctx.save();
+  ctx.globalAlpha = a * 0.42;
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 1.8;
+  const rimWorld = CY + RIM_Y;
+  for (const dx of [-0.18, 0.18]) {
+    const sx = CX + BOWL_W * dx;
+    ctx.beginPath();
+    ctx.moveTo(sx, rimWorld - 8);
+    ctx.bezierCurveTo(sx - 5, rimWorld - 16, sx + 5, rimWorld - 24, sx, rimWorld - 32);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// 打嗝时冒的一小股气
+function drawBurp(t) {
+  const d = t - T_BURP;
+  if (d < 0 || d > 0.7) return;
+  const k = d / 0.7;
+  ctx.save();
+  ctx.globalAlpha = (1 - k) * 0.5;
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 1.6;
+  const rimWorld = CY + RIM_Y;
+  for (const dx of [-0.10, 0.10]) {
+    const sx = CX + BOWL_W * dx;
+    const up = rimWorld - 10 - k * 22;
+    ctx.beginPath();
+    ctx.moveTo(sx, rimWorld - 6 - k * 14);
+    ctx.quadraticCurveTo(sx + 4, up + 6, sx, up);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawBowl(shift, lift, rice) {
+  ctx.save();
+  ctx.translate(CX + shift, CY + lift);
+
+  // ① 碗身：顶部沿碗口的下半弧闭合。
+  //
+  // 不能用 closePath 直接连 —— 那会在碗口位置拉一条直线，
+  // 看起来像碗中间横着一根棍子。沿弧线走回去，填充区的上沿
+  // 就是碗口的近侧半圈，跟后面描的那半圈天然重合。
+  ctx.beginPath();
+  ctx.moveTo(-RX, RIM_Y);
+  ctx.bezierCurveTo(-BOWL_W * 0.40, BOT_Y * 1.7, BOWL_W * 0.40, BOT_Y * 1.7, RX, RIM_Y);
+  ctx.ellipse(0, RIM_Y, RX, RY, 0, 0, Math.PI, false);
+  ctx.closePath();
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fill();
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 2.8;
+  ctx.stroke();
+
+  // ② 碗口远侧（上半弧）—— 必须在饭之前
+  ctx.beginPath();
+  ctx.ellipse(0, RIM_Y, RX, RY, 0, Math.PI, Math.PI * 2);
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 2.2;
+  ctx.stroke();
+
+  // ③ 饭
+  if (rice > 0.04) {
+    const rise = BOWL_H * 0.52 * rice;
+    ctx.beginPath();
+    ctx.moveTo(-BOWL_W * 0.38, RIM_Y + RY * 0.6);
+    ctx.bezierCurveTo(
+      -BOWL_W * 0.34, RIM_Y - rise,
+       BOWL_W * 0.34, RIM_Y - rise,
+       BOWL_W * 0.38, RIM_Y + RY * 0.6
+    );
+    ctx.closePath();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fill();
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 2.2;
+    ctx.stroke();
+  }
+
+  // ④ 碗口近侧（下半弧）—— 压在饭后，形成深度
+  ctx.beginPath();
+  ctx.ellipse(0, RIM_Y, RX, RY, 0, 0, Math.PI);
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 2.4;
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawCrumbs(t) {
+  for (const s of CRUMB_SEEDS) {
+    const k = (t - s.at) / 0.5;
+    if (k <= 0 || k >= 1) continue;
+    const x = CX + BOWL_W * 0.28 + s.vx * k;
+    const y = CY + RIM_Y + s.vy * k + 150 * k * k;
+    ctx.save();                          // ← 每颗单独存栈，alpha 不泄漏
+    ctx.globalAlpha = 1 - k * 0.7;
+    ctx.beginPath();
+    ctx.arc(x, y, s.r, 0, Math.PI * 2);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fill();
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 1.1;
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+let start = null;
+function render(now) {
+  if (start === null) start = now;
+  const t = (now - start) / 1000;
+  const clamped = Math.min(t, T_END);
+
+  ctx.clearRect(0, 0, W, H);
+
+  drawSteam(clamped);
+  drawBowl(bowlShift(clamped), burpLift(clamped), riceAmount(clamped));
+  drawCrumbs(clamped);
+  drawBurp(clamped);
+
+  // 演完继续跑但画面不再变 —— WKWebView 那边可以据此知道该收了
+  if (t < T_END) requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+</script>
+</body>
+</html>

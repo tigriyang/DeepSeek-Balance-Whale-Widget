@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%;
+               background: transparent; overflow: hidden; }
+  /* height: auto 让它按画布自身比例缩放。
+     写 height:100% 会把它硬拉到容器的比例，碗会被压成杯子。 */
+  canvas { display: block; width: 100%; height: auto; }
+</style>
+</head>
+<body>
+<canvas id="frame" width="180" height="92"></canvas>
+<script>
+// 「想干饭」—— 饭点提醒。碗和字并排，碗轻轻左右晃。
+//
+// 跟「吃白饭」（meal）不是一回事：那个是 meme，碗从满到空；
+// 这个是提醒，画面基本静止，只靠一点点晃动告诉你有东西在动。
+//
+// 画布 220×92，被 WKWebView 缩到 110×46 点显示。
+// 碗与字取同一视觉高度，谁都不压谁。
+const INK = '#2B3A67';
+const c = document.getElementById('frame');
+const ctx = c.getContext('2d');
+
+// 画布按内容收窄：碗 56 宽 + 8 间隙 + 字 90 宽 ≈ 168，留一点边。
+const W = 180, H = 92;
+const BOWL_W = 56, BOWL_H = 48;
+const BOWL_CX = 32, BOWL_CY = H / 2 + 4;
+const RIM_Y = -BOWL_H * 0.46;
+const RX = BOWL_W / 2;
+const RY = BOWL_H * 0.20;
+
+const TEXT = '想干饭';
+// 40pt 时「想干饭」三字约 160px，从 x=86 起画会顶出 220 的画布 —— 右边被切。
+// 30pt 刚好留出余量，跟碗的高度也更接近。
+const FONT_SIZE = 30;
+const TEXT_X = 70;
+
+const CYCLE = 2600;
+
+// 绕碗底中心摆一下 —— 像端着一碗饭轻轻晃。
+// 光平移没意思，得让碗身有角度，看着才有重量。
+function drawBowl(shift, angleDeg) {
+  ctx.save();
+  ctx.translate(BOWL_CX + shift, BOWL_CY);
+  // 枢轴移到碗底（+y 方向），转完再移回来
+  const pivotY = BOWL_H * 0.46;
+  ctx.translate(0, pivotY);
+  ctx.rotate(angleDeg * Math.PI / 180);
+  ctx.translate(0, -pivotY);
+
+  // 碗身
+  ctx.beginPath();
+  ctx.moveTo(-RX, RIM_Y);
+  ctx.bezierCurveTo(-BOWL_W * 0.40, BOWL_H * 0.85, BOWL_W * 0.40, BOWL_H * 0.85, RX, RIM_Y);
+  ctx.ellipse(0, RIM_Y, RX, RY, 0, 0, Math.PI, false);
+  ctx.closePath();
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fill();
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  // 碗口远侧
+  ctx.beginPath();
+  ctx.ellipse(0, RIM_Y, RX, RY, 0, Math.PI, Math.PI * 2);
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 2.4;
+  ctx.stroke();
+
+  // 冒尖的饭
+  const rise = BOWL_H * 0.42;
+  ctx.beginPath();
+  ctx.moveTo(-BOWL_W * 0.36, RIM_Y + RY * 0.5);
+  ctx.bezierCurveTo(
+    -BOWL_W * 0.30, RIM_Y - rise,
+     BOWL_W * 0.30, RIM_Y - rise,
+     BOWL_W * 0.36, RIM_Y + RY * 0.5
+  );
+  ctx.closePath();
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fill();
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 2.4;
+  ctx.stroke();
+
+  // 碗口近侧
+  ctx.beginPath();
+  ctx.ellipse(0, RIM_Y, RX, RY, 0, 0, Math.PI);
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 2.6;
+  ctx.stroke();
+
+  // 热气
+  ctx.globalAlpha = 0.42;
+  ctx.lineWidth = 2;
+  for (const dx of [-0.22, 0.22]) {
+    const sx = BOWL_W * dx;
+    const top = RIM_Y - 6;
+    ctx.beginPath();
+    ctx.moveTo(sx, top);
+    ctx.bezierCurveTo(sx - 5, top - 10, sx + 5, top - 18, sx, top - 26);
+    ctx.stroke();
+    ctx.globalAlpha = 0.42;
+  }
+  ctx.globalAlpha = 1;
+
+  ctx.restore();
+}
+
+function render(now) {
+  const p = (now % CYCLE) / CYCLE;
+  // 一个周期里左右各摆一次（2.6 秒一个来回，够慢）。
+  // 旋转为主、平移为辅 —— 只平移的话几乎看不出来。
+  const wave = Math.sin(p * Math.PI * 2);
+  const angle = wave * 3.2;        // ±3.2 度
+  const shift = wave * 1.2;        // ±1.2 像素的横向跟动
+
+  ctx.clearRect(0, 0, W, H);
+  drawBowl(shift, angle);
+
+  ctx.font = '600 ' + FONT_SIZE + 'px "PingFang SC", -apple-system, sans-serif';
+  ctx.fillStyle = INK;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  ctx.fillText(TEXT, TEXT_X, H / 2 + 1);
+
+  requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+</script>
+</body>
+</html>

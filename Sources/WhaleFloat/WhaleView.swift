@@ -69,8 +69,9 @@ final class WhaleView: NSView {
     nonisolated static let defaultRoleFile = "role-clean.png"
     /// 气泡形状层（独立绘制，不属于角色图）。
     private let bubbleShape = BubbleShapeView()
-    /// 「干饭」彩蛋里那碗饭。平时叠在栈里但隐藏。
-    private let bowlView = BowlView()
+    /// 「干饭」彩蛋的动画。是一个 WKWebView，内容来自
+    /// Resources/animations/meal/index.html —— 可被用户目录里的同名动画覆盖。
+    private let mealView = AnimationHost()
     private let stack = NSStackView()
     /// 摸摸头：点击时的动画与音效。
     private var touch: TouchReaction?
@@ -234,8 +235,16 @@ final class WhaleView: NSView {
         stack.addArrangedSubview(valleyRow)   // 含「谷/峰」徽章与时间
 
         // 吃饭彩蛋用：平时藏着
-        bowlView.isHidden = true
-        stack.addArrangedSubview(bowlView)
+        mealView.isHidden = true
+        stack.addArrangedSubview(mealView)
+        // NSStackView 不认 intrinsicContentSize，得用显式约束把它钉死，
+        // 否则 WKWebView 会一路撑满整个浮窗。
+        mealView.translatesAutoresizingMaskIntoConstraints = false
+        // 「想干饭」是横排画面（碗 + 字），180:92 大约 2:1
+        NSLayoutConstraint.activate([
+            mealView.widthAnchor.constraint(equalToConstant: 96),
+            mealView.heightAnchor.constraint(equalToConstant: 49),
+        ])
 
         // 栈宽不超过气泡内宽 —— 手动布局下这里只用于 initial fittingSize，
         // 真正的宽度在 positionBubbleStack 里夹取。
@@ -642,11 +651,11 @@ final class WhaleView: NSView {
         amountLabel.isHidden = true
         usedLabel.isHidden = true
         badgeRow?.isHidden = true
-        bowlView.isHidden = false
+        mealView.isHidden = false
         // 横排：碗在左，文字在右
         stack.orientation = .horizontal
         stack.spacing = 8
-        bowlView.startChewing()
+        mealView.play("hungry")
         setBubbleVisible(true)
     }
 
@@ -655,8 +664,8 @@ final class WhaleView: NSView {
     /// 吃饭彩蛋把栈改成了横排、藏了几行，下一次冒普通泡之前必须还原，
     /// 否则余额泡会长成一只碗加一个数字。
     private func restoreBubbleLayout() {
-        bowlView.stopChewing()
-        bowlView.isHidden = true
+        mealView.stop()
+        mealView.isHidden = true
         amountLabel.isHidden = false
         usedLabel.isHidden = false
         badgeRow?.isHidden = false
@@ -666,7 +675,7 @@ final class WhaleView: NSView {
 
     /// 收起吃饭泡时调用，确保下次布局是干净的。
     func endMealIfNeeded() {
-        guard !bowlView.isHidden else { return }
+        guard !mealView.isHidden else { return }
         restoreBubbleLayout()
     }
 
