@@ -111,6 +111,22 @@ enum PluginInstaller {
                 try fm.createDirectory(at: pluginsDir, withIntermediateDirectories: true)
                 if fm.fileExists(atPath: to.path) { try fm.removeItem(at: to) }
                 try fm.copyItem(at: from, to: to)
+
+                // 还要更新 DSH profile 里的那份。
+                //
+                // profile 的 package.json 用 "file:..." 引用这个目录，
+                // pnpm 装的时候是**复制**而不是软链 —— 只改源目录，
+                // DSH 加载的还是旧副本。这个坑让「新功能点了没反应」
+                // 多绕了好几圈。
+                let homeDir = fm.homeDirectoryForCurrentUser
+                let profileCopy = homeDir
+                    .appendingPathComponent(".dsh/profiles/web/node_modules")
+                    .appendingPathComponent(name)
+                if fm.fileExists(atPath: profileCopy.path) {
+                    try? fm.removeItem(at: profileCopy)
+                    try? fm.copyItem(at: from, to: profileCopy)
+                }
+
                 copied.append(name)
             } catch {
                 failed.append("\(name)（\(error.localizedDescription)）")
