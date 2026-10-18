@@ -310,17 +310,16 @@ async function startNewSession(sc, sessions, text) {
 	// 这条链路牵涉 DSH 内部好几个服务，出错时宿主那边看不到任何提示。
 	// 落一份日志到 /tmp，用户报「点了没反应」时能直接看出卡在哪。
 	try {
-		// createSession 返回的是 { agent, agentPreset } —— 没有 sessionId 字段。
-		// 一开始按 { sessionId } 取，拿到 undefined 就抛异常，
-		// 表现成「点了没反应」。直接用返回的 agent 投递即可。
-		const created = await sc.createSession({});
-		const agent = created?.agent;
-		if (!agent) throw new Error("createSession 没返回 agent");
+		// 方法名是 create，不是 createSession ——
+		// 后者是内部的另一层（SessionController 上），没被 RPC 代理暴露，
+		// 调它会得到 "sc.createSession is not a function"。
+		// create 是业务命令层（SessionCommandController）的，返回 { sessionId, agentPreset }。
+		const created = await sc.create({});
+		const sid = String(created?.sessionId ?? "");
+		if (sid === "") throw new Error("create 没返回 sessionId");
 
-		agent.followup(makeUserMessage(text));
-		await sessions?.flush?.(agent.session);
-
-		const sid = String(agent.id ?? agent.session?.id ?? "");
+		// 会话建好后把首条投进去
+		await deliverReply(sc, sessions, sid, text);
 		log("新会话已投递 session=" + sid);
 		return sid;
 	} catch (err) {
