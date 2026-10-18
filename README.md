@@ -289,7 +289,7 @@ WhaleFloat.app                Swift 6 + AppKit 原生程序
 
 ## 贡献
 
-开发这个软件烧掉的 token，全部来自深度求索公司赠予的额度,基于dsh做VIBECODING。
+开发这个软件烧掉的 token，全部来自深度求索公司赠予的额度。
 
 截至 0.1.10 版本，累计用量如下：
 

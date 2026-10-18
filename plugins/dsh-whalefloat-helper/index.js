@@ -295,6 +295,20 @@ async function deliverReply(sc, sessions, sessionId, text) {
 	await sessions?.flush?.(agent.session);
 }
 
+/**
+ * 起一次新对话。
+ *
+ * 不传 cwd 就用 DSH 的 defaultCwd —— 插件不知道用户的工作区在哪，
+ * 也没必要猜。会话建好后立刻把首条消息投进去，DSH 就会开口。
+ */
+async function startNewSession(sc, sessions, text) {
+	const created = await sc.createSession({});
+	const sid = created?.sessionId;
+	if (!sid) throw new Error("createSession 没返回 sessionId");
+	await deliverReply(sc, sessions, sid, text);
+	return sid;
+}
+
 function makeReplyPoller(ctx, sc, sessions) {
 	let lastSeq = 0;
 	return setInterval(() => {
@@ -306,9 +320,17 @@ function makeReplyPoller(ctx, sc, sessions) {
 				lastSeq = box.seq;
 
 				const text = String(box.text ?? "").trim();
-				const sid = String(box.sessionId ?? "");
-				if (text === "" || sid === "") return;
+				if (text === "") return;
 
+				// newSession：不投给现有会话，而是开一个新的
+				if (box.newSession === true) {
+					const sid = await startNewSession(sc, sessions, text);
+					ctx.logger?.info?.(`whalefloat-helper: 已新建会话 ${sid}`);
+					return;
+				}
+
+				const sid = String(box.sessionId ?? "");
+				if (sid === "") return;
 				await deliverReply(sc, sessions, sid, text);
 				ctx.logger?.info?.(`whalefloat-helper: 已注入回复（session ${sid}）`);
 			} catch (err) {

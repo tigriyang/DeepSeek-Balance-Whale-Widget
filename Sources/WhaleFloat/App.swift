@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 由命令行参数 --analysis 置位：启动完成后直接打开分析窗口。
     var openAnalysisOnLaunch = false
 
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 单实例守卫必须放在最前面 —— 宁可什么都不做，也别多起一只鲸鱼。
         guard SingleInstance.acquire() else {
@@ -347,34 +348,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// 菜单「导入音效素材…」—— 选两个 mp3，分别作为按下 / 松开音。
-    @objc func importSound() {
+    /// 音效的两个槽位。
+    ///
+    /// 拆开而不是「一次选 1~2 个、按顺序对应」—— 顺序靠猜容易搞反，
+    /// 而且用户看不到哪个文件进了哪个槽。
+    enum SoundSlot {
+        case pressDown, pressUp
+
+        var fileName: String {
+            switch self {
+            case .pressDown: return "press-down.mp3"
+            case .pressUp: return "press-up.mp3"
+            }
+        }
+        var panelTitle: String {
+            switch self {
+            case .pressDown: return "选择按下时的音效"
+            case .pressUp: return "选择松开时的音效"
+            }
+        }
+    }
+
+    @objc func importPressDownSound() { importSound(for: .pressDown) }
+    @objc func importPressUpSound() { importSound(for: .pressUp) }
+
+    private func importSound(for slot: SoundSlot) {
         let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = true
+        panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.allowedContentTypes = [.mp3, .mpeg4Audio, .wav, .aiff]
-        panel.message = "选择 1~2 个音效（第一个作按下音，第二个作松开音）"
-        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
+        panel.message = slot.panelTitle
+        guard panel.runModal() == .OK, let src = panel.url else { return }
+
         let fm = FileManager.default
         do {
             try fm.createDirectory(at: Settings.assetsDir, withIntermediateDirectories: true)
-            let names = ["press-down.mp3", "press-up.mp3"]
-            for (i, src) in panel.urls.prefix(2).enumerated() {
-                let dst = Settings.assetsDir.appendingPathComponent(names[i])
-                if fm.fileExists(atPath: dst.path) { try fm.removeItem(at: dst) }
-                try fm.copyItem(at: src, to: dst)
-            }
-            // 只给了一个 → 松开音沿用同一个
-            if panel.urls.count == 1 {
-                let dst = Settings.assetsDir.appendingPathComponent("press-up.mp3")
-                if fm.fileExists(atPath: dst.path) { try fm.removeItem(at: dst) }
-                try fm.copyItem(at: panel.urls[0], to: dst)
-            }
+            let dst = Settings.assetsDir.appendingPathComponent(slot.fileName)
+            if fm.fileExists(atPath: dst.path) { try fm.removeItem(at: dst) }
+            try fm.copyItem(at: src, to: dst)
             floatWindow?.whaleView.reloadSounds()
         } catch {
-            let alert = NSAlert()
-            alert.messageText = "导入音效失败"
-            alert.informativeText = error.localizedDescription
-            alert.runModal()
+            alert("导入音效失败", error.localizedDescription)
         }
     }
 
@@ -549,6 +563,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 菜单「充值 / 查看用量」：打开平台页面。
     @objc func openBilling() {
         ExternalLinks.open(ExternalLinks.billing)
+    }
+
+    /// 菜单「新的对话」：让 DSH 起一个新会话，首条发「你好」。
+    ///
+    /// 用户不必先打开网页 —— DSH 回完会走正常的通知链路，
+    /// 那一刻就能直接在通知里接着说了。
+    @objc func startNewConversation() {
+        // 热启动：DSH 已经在跑，直接发。
+        if DSHLauncher.isRunning {
+            NotifyBridge.shared.beginNewSession()
+            return
+        }
+
+        // 冷启动：先把 DSH 拉起来，等它真的能收消息了再发。
+        //
+        // 整个过程不弹任何框 —— 用户点这一下是想说话，不是想听进度。
+        // 成功与否都有回音：成功了 DSH 会回一句并推通知，超时则明确告知。
+        NSLog("WhaleFloat: 新的对话 —— DSH 未运行，先冷启动")
+        DSHLauncher.launch()
+        waitForDSHReady(timeout: 120) { [weak self] ok in
+            guard let self else { return }
+            if ok {
+                NotifyBridge.shared.beginNewSession()
+            } else {
+                self.alert("DSH 没起来",
+                           "等了两分钟仍连不上 3080。可以点「启动 DSH GUI」看看卡在哪。")
+            }
+        }
+    }
+
+    /// 轮询等 DSH 可以接消息。返回是否在超时前就绪。
+    ///
+    /// 端口通了还不算完：DSH 要把插件加载完才认得 reply 文件，
+    /// 所以再多等两秒。宁可慢一点，也别让消息写进一个还没人的信箱。
+    private func waitForDSHReady(timeout: TimeInterval,
+                                 completion: @escaping @MainActor (Bool) -> Void) {
+        Task { @MainActor in
+            let deadline = Date().addingTimeInterval(timeout)
+            while Date() < deadline {
+                if DSHLauncher.isRunning {
+                    // 端口通了还不算完 —— 再给插件两秒加载时间
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    completion(true)
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+            completion(false)
+        }
+    }
+
+    /// 一个统一的小弹窗。走 NSAlert 而不是系统通知 ——
+    /// 用户刚点了菜单，视线就在这儿，弹窗比通知更近。
+    private func alert(_ title: String, _ body: String,
+                       style: NSAlert.Style = .warning) {
+        let a = NSAlert()
+        a.messageText = title
+        a.informativeText = body
+        a.alertStyle = style
+        a.runModal()
     }
 
     @objc func launchDSH() {
