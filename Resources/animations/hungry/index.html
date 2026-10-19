@@ -5,6 +5,8 @@
 <style>
   html, body { margin: 0; padding: 0; width: 100%; height: 100%;
                background: transparent; overflow: hidden; }
+  /* 容器现在是正方形，2:1 的画布要垂直居中，别贴在顶上。 */
+  body { display: flex; align-items: center; justify-content: center; }
   /* 比例锁死在 2:1（画布 180×92）。
      height:100% 会按容器的比例硬拉，碗会被压成杯子；
      光靠 height:auto 又依赖容器尺寸刚好对上。

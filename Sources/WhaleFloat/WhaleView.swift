@@ -69,11 +69,14 @@ final class WhaleView: NSView {
     nonisolated static let defaultRoleFile = "role-clean.png"
     /// 气泡形状层（独立绘制，不属于角色图）。
     private let bubbleShape = BubbleShapeView()
-    /// 「干饭」彩蛋的动画。是一个 WKWebView，内容来自
-    /// Resources/animations/meal/index.html —— 可被用户目录里的同名动画覆盖。
-    private let mealView = AnimationHost()
-    private var mealWidth: NSLayoutConstraint?
-    private var mealHeight: NSLayoutConstraint?
+    /// 有图片被拖到身上时回调，参数是落盘后的文件路径。
+    var onImageDropped: ((URL) -> Void)?
+
+    /// 动画行：放在气泡内部的栈里，由 NSStackView 排版 ——
+    /// 不再另起一层做绝对定位，也就没有「换张立绘就歪」的问题。
+    private let animationView = AnimationHost()
+    private var animationWidth: NSLayoutConstraint?
+    private var animationHeight: NSLayoutConstraint?
     private let stack = NSStackView()
     /// 摸摸头：点击时的动画与音效。
     private var touch: TouchReaction?
@@ -236,19 +239,16 @@ final class WhaleView: NSView {
         stack.addArrangedSubview(usedLabel)
         stack.addArrangedSubview(valleyRow)   // 含「谷/峰」徽章与时间
 
-        // 吃饭彩蛋用：平时藏着
-        mealView.isHidden = true
-        stack.addArrangedSubview(mealView)
-        // NSStackView 不认 intrinsicContentSize，得用显式约束把它钉死，
-        // 否则 WKWebView 会一路撑满整个浮窗。
-        mealView.translatesAutoresizingMaskIntoConstraints = false
-        // 尺寸随动画变：「想干饭」是横排（碗 + 字，约 2:1），
-        // 「吃白饭」是正方形。写死一个会把另一个拉变形。
-        let wc = mealView.widthAnchor.constraint(equalToConstant: 96)
-        let hc = mealView.heightAnchor.constraint(equalToConstant: 49)
-        NSLayoutConstraint.activate([wc, hc])
-        mealWidth = wc
-        mealHeight = hc
+        // 动画作为栈里的一行出现：位置、居中都交给 NSStackView，
+        // 这里只锁住它自己的宽高比例。
+        animationView.isHidden = true
+        animationView.translatesAutoresizingMaskIntoConstraints = false
+        stack.addArrangedSubview(animationView)
+        let aw = animationView.widthAnchor.constraint(equalToConstant: 60)
+        let ah = animationView.heightAnchor.constraint(equalToConstant: 30)
+        NSLayoutConstraint.activate([aw, ah])
+        animationWidth = aw
+        animationHeight = ah
 
         // 栈宽不超过气泡内宽 —— 手动布局下这里只用于 initial fittingSize，
         // 真正的宽度在 positionBubbleStack 里夹取。
@@ -514,8 +514,29 @@ final class WhaleView: NSView {
             badgeRow.isHidden = true
             lastTurnLabel.isHidden = true
         case .meal, .snack:
-            // 吃饭视图：只有动画和一句提示，其余全藏。
-            // 具体播哪个动画在 showMeal(animated:) 里决定。
+            // 吃饭类：动画在角色身上，气泡整个不显示（showsBubble = false），
+            // 这里把所有行藏掉，免得淡出的瞬间露出余额文字。
+            titleLabel.isHidden = true
+            amountLabel.isHidden = true
+            usedLabel.isHidden = true
+            badgeRow.isHidden = true
+            lastTurnLabel.isHidden = true
+        case .company:
+            // 陪伴：只留一句轻话，别的都不显示
+            titleLabel.isHidden = false
+            amountLabel.isHidden = true
+            usedLabel.isHidden = true
+            badgeRow.isHidden = true
+            lastTurnLabel.isHidden = true
+        case .animation:
+            // 手动播放：整块气泡只有动画
+            titleLabel.isHidden = true
+            amountLabel.isHidden = true
+            usedLabel.isHidden = true
+            badgeRow.isHidden = true
+            lastTurnLabel.isHidden = true
+        case .study:
+            // 拖图回执：一句话
             titleLabel.isHidden = false
             amountLabel.isHidden = true
             usedLabel.isHidden = true
@@ -575,6 +596,25 @@ final class WhaleView: NSView {
         amountLabel.stringValue = message
         usedLabel.stringValue = " "
         lastTurnLabel.stringValue = " "
+        autofitLabels()
+    }
+
+    /// 陪伴文案：只改第一行，其余保持隐藏。
+    ///
+    /// 为什么不走 setAlert/update：那些会连金额、时间一起改，
+    /// 陪伴泡里只该有一句轻轻的话。
+    func setCompanyCaption(_ text: String) {
+        titleLabel.stringValue = text
+        titleLabel.font = scaledFont(size: BubbleStyle.titleSize - 1, weight: .medium)
+        titleLabel.textColor = BubbleStyle.ink
+        autofitLabels()
+    }
+
+    /// 拖图回执文案。
+    func setStudyCaption(_ text: String) {
+        titleLabel.stringValue = text
+        titleLabel.font = scaledFont(size: BubbleStyle.titleSize, weight: .medium)
+        titleLabel.textColor = BubbleStyle.ink
         autofitLabels()
     }
 
@@ -645,64 +685,64 @@ final class WhaleView: NSView {
     /// 气泡可见性。用透明度动画做淡入淡出，避免生硬突变。
     private(set) var bubbleVisible = true
 
+    /// 冒一个「干饭」动画：气泡里换成那一碗动画，不显示数字。
+    /// 返回 false 表示没播成（素材缺失 / 兼容性不过 / 动画总开关关着）。
+    @discardableResult
+    func showMeal(animated name: String = "hungry") -> Bool {
+        playAnimation(named: name)
+    }
+
+    /// 只写一行字（动画不可用时的退路）。
+    func setSimpleText(_ text: String) {
+        titleLabel.stringValue = text
+        titleLabel.font = scaledFont(size: BubbleStyle.titleSize, weight: .medium)
+        titleLabel.textColor = BubbleStyle.ink
+        titleLabel.isHidden = false
+        autofitLabels()
+        needsLayout = true
+    }
+
+    /// 在气泡里播一个动画。找不到或不兼容时安静跳过，并在日志里留一句。
+    ///
+    /// 尺寸只在「气泡内宽 / 内高」之间取最大等比：
+    ///   · 宽高都来自气泡这个已有布局，不再依赖角色立绘的构图
+    ///   · 比例来自素材本身（GIF 的像素尺寸 / HTML 的 canvas 尺寸）
+    @discardableResult
+    func playAnimation(named name: String) -> Bool {
+        guard !name.isEmpty else { return false }
+        guard let asset = AnimationCatalog.shared.asset(named: name) else {
+            NSLog("WhaleFloat: 动画「\(name)」不可用，跳过")
+            return false
+        }
+        let maxW = max(24, min(bounds.width * 0.68, bubbleWidth))
+        let maxH = max(16, bubbleHeight * 0.86)
+        let aspect = max(0.2, asset.aspect)
+        var w = maxW
+        var h = w / aspect
+        if h > maxH {
+            h = maxH
+            w = h * aspect
+        }
+        animationWidth?.constant = w
+        animationHeight?.constant = h
+        animationView.isHidden = false
+        animationView.play(asset)
+        needsLayout = true
+        return true
+    }
+
+    /// 停掉当前动画并藏起来（切气泡、收起吃饭泡时调用）。
+    func stopAnimation() {
+        animationView.stop()
+        animationView.isHidden = true
+        needsLayout = true
+    }
+
     /// 切换气泡显隐。
     ///
     /// 分层之后逻辑很直接：气泡 = **形状层 + 文字层**，两者一起淡入淡出，
     /// 角色层完全不受影响 —— 这正是原作的做法（气泡由 SVG 画，与角色图无关）。
     /// 早先从合成图里抠气泡时，才会遇到「背景先没了、文字还在淡出」这类错序。
-    /// 冒个「干饭」泡：气泡里换成一碗饭加一句「干饭去」，饭在嚼。
-    ///
-    /// 彩蛋不占菜单、不打扰流程，撞见才有意思。所以这里只负责把画面摆好，
-    /// 什么时候该冒由 AppDelegate 按时间决定。
-    func showMeal(animated name: String = "hungry") {
-        restoreBubbleLayout()
-        // 每个动画的画布比例不同，容器跟着调
-        let size: NSSize = (name == "hungry") ? NSSize(width: 96, height: 49)
-                                              : NSSize(width: 56, height: 56)
-        mealWidth?.constant = size.width
-        mealHeight?.constant = size.height
-        amountLabel.isHidden = true
-        usedLabel.isHidden = true
-        badgeRow?.isHidden = true
-        mealView.isHidden = false
-
-        // 两个动画的排法不同：
-        //   hungry —— 碗 +「想干饭」并排
-        //   meal   —— 只有那碗饭，动画自己演完全程
-        if name == "hungry" {
-            titleLabel.stringValue = "想干饭"
-            titleLabel.isHidden = false
-            stack.orientation = .horizontal
-            stack.spacing = 8
-        } else {
-            titleLabel.isHidden = true
-            stack.orientation = .vertical
-            stack.spacing = 0
-        }
-        mealView.play(name)
-        setBubbleVisible(true)
-    }
-
-    /// 把气泡恢复成「竖排四行」的常规样子。
-    ///
-    /// 吃饭彩蛋把栈改成了横排、藏了几行，下一次冒普通泡之前必须还原，
-    /// 否则余额泡会长成一只碗加一个数字。
-    private func restoreBubbleLayout() {
-        mealView.stop()
-        mealView.isHidden = true
-        amountLabel.isHidden = false
-        usedLabel.isHidden = false
-        badgeRow?.isHidden = false
-        stack.orientation = .vertical
-        stack.spacing = 1
-    }
-
-    /// 收起吃饭泡时调用，确保下次布局是干净的。
-    func endMealIfNeeded() {
-        guard !mealView.isHidden else { return }
-        restoreBubbleLayout()
-    }
-
     func setBubbleVisible(_ visible: Bool, animated: Bool = true) {
         guard bubbleVisible != visible || stack.alphaValue != (visible ? 1 : 0) else { return }
         bubbleVisible = visible
@@ -730,7 +770,8 @@ final class WhaleView: NSView {
             DispatchQueue.main.asyncAfter(deadline: .now() + fadeSeconds + 0.05) { [weak self] in
                 guard let self, !self.bubbleVisible else { return }
                 self.bubbleShape.isHidden = true
-                self.restoreBubbleLayout()
+                // 气泡收完再把动画停掉：它本来就只在泡里活着
+                self.stopAnimation()
             }
         }
     }

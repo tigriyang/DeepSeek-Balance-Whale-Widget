@@ -246,6 +246,19 @@ struct Settings: Codable {
     /// 音量 0…1。
     var soundVolume: Double = 0.9
 
+    // ── 动画（0.2.0「创意工坊」）──────────────────────────
+    /// 动画总开关。关掉之后所有触发都不再播放，桌宠回到纯立绘。
+    var animationOn: Bool = true
+    /// 饭点提醒时播放的动画名。
+    var animationMeal: String = "hungry"
+    /// 静置偷吃时播放的动画名。
+    var animationSnack: String = "meal"
+
+    // ── 陪伴（0.2.0「floatcompany」）──────────────────────
+    /// 忙久了说一句加油。
+    /// 只读「距上一次按键多少秒」，不读按键内容 —— 见 CompanyWatcher。
+    var companyOn: Bool = true
+
     static let fileURL: URL = {
         let home = FileManager.default.homeDirectoryForCurrentUser
         return home.appendingPathComponent(".dsh/whalefloat.json")
@@ -261,6 +274,23 @@ struct Settings: Codable {
     static let assetsDir: URL = {
         let home = FileManager.default.homeDirectoryForCurrentUser
         return home.appendingPathComponent(".dsh/whalefloat-assets", isDirectory: true)
+    }()
+
+    /// 拖进来的图片存放目录（floatstudy）。
+    static let dropsDir: URL = {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        return home.appendingPathComponent(".dsh/whalefloat-drops", isDirectory: true)
+    }()
+
+    /// 第三方动画目录（0.2.0 创意工坊）。
+    ///
+    /// 两种放法：
+    ///   · `<名字>/index.html` —— 自己画的 canvas 动画（老办法）
+    ///   · `<名字>.gif`       —— 拖一个 GIF 进来就能用（0.2.0 新增）
+    /// 同名时以 HTML 为准，包内同名又被用户目录覆盖。
+    static let animationsDir: URL = {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        return home.appendingPathComponent(".dsh/whalefloat-animations", isDirectory: true)
     }()
 
     /// 宽容解码：**每个字段缺失都退回默认值**，而不是让整份配置解不出来。
@@ -290,6 +320,10 @@ struct Settings: Codable {
         dailyBudget = get(.dailyBudget, 0)
         soundOn = get(.soundOn, true)
         soundVolume = get(.soundVolume, 0.9)
+        animationOn = get(.animationOn, true)
+        animationMeal = get(.animationMeal, "hungry")
+        animationSnack = get(.animationSnack, "meal")
+        companyOn = get(.companyOn, true)
     }
 
     static func load() -> Settings {

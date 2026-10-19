@@ -12,8 +12,11 @@ enum BubbleKind {
     case turn             // 本轮消耗
     case alert            // 提醒（余额预警 / 超预算）
     case waiting          // DSH 正在等用户回答 / 授权
-    case meal             // 饭点提醒（「想干饭」，碗轻轻晃）
-    case snack            // 偷吃白饭（碗从满到空，最后打嗝）
+    case meal             // 饭点提醒（动画在角色身上，不占气泡）
+    case snack            // 偷吃白饭（同上）
+    case company          // 忙久了说一句加油（0.2.0 floatcompany）
+    case animation        // 手动播放的一段动画（气泡里只有动画）
+    case study            // 拖图给小鲸鱼后的「看图去…」
 
     var autoHideSeconds: TimeInterval {
         switch self {
@@ -24,6 +27,18 @@ enum BubbleKind {
         case .waiting: return 0  // 等待状态由事件解除，不靠计时
         case .meal: return 6     // 饭点提醒看一眼就够
         case .snack: return 8    // 偷吃要演完：吃、见底、打嗝
+        case .company: return 6  // 一句加油，几秒就收
+        case .animation: return 6
+        case .study: return 5    // 「看图去」只是回执，看两眼就够
+        }
+    }
+
+    /// 这一类要不要显示气泡本体。
+    /// 动画现在放回气泡内部的栈里，所以吃饭/偷吃/手动播放都要显示。
+    var showsBubble: Bool {
+        switch self {
+        case .hidden: return false
+        default: return true
         }
     }
 }
@@ -44,6 +59,8 @@ final class BubblePresenter {
 
     /// 内容变化时回调（用于填充文字）。
     var onPresent: ((BubbleKind) -> Void)?
+    /// 一类泡被替换或收起时回调（用来停掉它带起的动画）。
+    var onHide: ((BubbleKind) -> Void)?
 
     init(view: WhaleView) {
         self.view = view
@@ -52,9 +69,11 @@ final class BubblePresenter {
     /// 冒一个泡。若已有泡在显示则替换内容并重置计时。
     func show(_ newKind: BubbleKind) {
         guard newKind != .hidden else { hideNow(); return }
+        // 旧的泡被顶掉时先让它收尾（比如把「干饭」动画停掉）
+        if kind != .hidden, kind != newKind { onHide?(kind) }
         kind = newKind
         onPresent?(newKind)
-        view?.setBubbleVisible(true)
+        view?.setBubbleVisible(newKind.showsBubble)
 
         hideTimer?.invalidate()
         hideTimer = nil
@@ -79,9 +98,11 @@ final class BubblePresenter {
 
     /// 立即收起。
     func hideNow() {
+        let old = kind
         hideTimer?.invalidate()
         hideTimer = nil
         kind = .hidden
+        if old != .hidden { onHide?(old) }
         view?.setBubbleVisible(false)
     }
 

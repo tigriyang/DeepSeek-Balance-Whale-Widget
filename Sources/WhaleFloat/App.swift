@@ -22,6 +22,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 由 --eat 置位：启动后立即演一次「偷吃白饭」。
     var openSnackOnLaunch = false
 
+    /// 由 --company 置位：启动后演示一次陪伴（8 秒）。
+    var previewCompanyOnLaunch = false
+
+    /// 由 --play 置位：启动后播一次指定动画（自测用）。
+    var playAnimationOnLaunch: String?
+
+    /// 由 --drop 置位：启动后走一遍拖图解题流程（自测用）。
+    var dropImageOnLaunch: String?
+
+    /// 由 --drop-copy 置位：按真实拖拽的落盘链路走一遍（自测用）。
+    var dropCopyOnLaunch: String?
+
+    /// 由 --company-after 置位：把「忙多久才说一句」改成这个秒数（自测用）。
+    var companyWorkSeconds: Double?
+
+    /// 码字陪伴的感知器（0.2.0 floatcompany）：忙久了说一句加油。
+    private var company: CompanyWatcher?
+    private var encourageIndex = 0
+    private let encourageLines = [
+        "老大加油",
+        "辛苦了，喝口水",
+        "我在这儿，慢慢写",
+        "写累了就伸个懒腰",
+    ]
+
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 单实例守卫必须放在最前面 —— 宁可什么都不做，也别多起一只鲸鱼。
@@ -67,6 +92,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if openAnalysisOnLaunch {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
                 self?.openLedger()
+            }
+        }
+
+        if previewCompanyOnLaunch {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                self?.showEncouragement()
+            }
+        }
+        if let name = playAnimationOnLaunch {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                guard let self, let view = self.floatWindow?.whaleView else { return }
+                guard view.playAnimation(named: name) else { return }
+                self.presenter.show(.animation)
+            }
+        }
+        if let path = dropImageOnLaunch {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+                self?.handleDroppedImage(URL(fileURLWithPath: path))
+            }
+        }
+        if let path = dropCopyOnLaunch {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+                guard let self else { return }
+                guard let img = NSImage(contentsOfFile: path),
+                      let saved = DroppedImageStore.save(img, preferredName: "自测截图") else {
+                    NSLog("WhaleFloat: 自测落盘失败 \(path)")
+                    return
+                }
+                self.handleDroppedImage(saved)
             }
         }
 
@@ -213,17 +267,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.settings.position = origin
             self?.settings.save()
         }
+        // 0.2.0 preview：拖图到角色身上 → 开新会话把图递过去
+        view.enableDropTarget()
+        view.onImageDropped = { [weak self] url in
+            self?.handleDroppedImage(url)
+        }
+
         floatWindow = win
         presenter = BubblePresenter(view: view)
+        // 泡被顶掉/收起时，把它带起来的动画一起停掉 ——
+        // 否则「干饭」的碗会留在脸上下不来。
+        presenter.onHide = { [weak self] kind in
+            guard let self else { return }
+            switch kind {
+            case .meal, .snack, .animation:
+                self.floatWindow?.whaleView.stopAnimation()
+            default:
+                break
+            }
+        }
         presenter.onPresent = { [weak self] kind in
             guard let self else { return }
+            // 换到别的内容时把上一段动画停掉（动画只属于 meal/snack/animation 三种）
+            if kind != .meal, kind != .snack, kind != .animation {
+                self.floatWindow?.whaleView.stopAnimation()
+            }
             // 吃饭泡的内容是固定的（一碗饭 + 干饭去），不走常规的文字渲染
             if kind == .meal {
-                self.floatWindow?.whaleView.showMeal(animated: "hungry")
+                let view = self.floatWindow?.whaleView
+                view?.applyKind(.meal)
+                let name = self.settings.animationMeal
+                let played = self.settings.animationOn && !name.isEmpty
+                    && (view?.showMeal(animated: name) ?? false)
+                if !played { view?.setSimpleText("想干饭") }
                 return
             }
             if kind == .snack {
-                self.floatWindow?.whaleView.showMeal(animated: "meal")
+                let view = self.floatWindow?.whaleView
+                view?.applyKind(.snack)
+                let name = self.settings.animationSnack
+                let played = self.settings.animationOn && !name.isEmpty
+                    && (view?.showMeal(animated: name) ?? false)
+                if !played { view?.setSimpleText("偷吃一口") }
                 return
             }
             self.renderBubbleContent()
@@ -243,7 +328,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // 气泡默认不显示 —— 只有轮次结束或点击才冒出来
         view.setBubbleVisible(false, animated: false)
         win.orderFrontRegardless()
+
+        // 先扫一遍动画目录：菜单里要能立刻看到内置与自定义项
+        AnimationCatalog.shared.reload()
+        startCompanyWatcherIfNeeded()
     }
+
+    // MARK: - 陪伴（0.2.0 floatcompany）
+
+    /// 按设置启用/停用码字陪伴。
+    func startCompanyWatcherIfNeeded() {
+        guard settings.companyOn else {
+            company?.stop()
+            company = nil
+            return
+        }
+        if company == nil {
+            let cw = CompanyWatcher()
+            cw.onEncourage = { [weak self] in self?.showEncouragement() }
+            company = cw
+        }
+        // 自测时把门槛调到几十秒；正式使用走 20 分钟
+        if let secs = companyWorkSeconds {
+            company?.workTarget = max(5, secs)
+            company?.breakReset = max(30, secs * 2)
+            company?.cooldown = max(20, secs)
+        }
+        company?.start()
+    }
+
+    /// 忙久了冒一句。
+    ///
+    /// 为什么只是一句话：动画要摆位置，位置一按素材算就会歪，
+    /// 换一张角色图就是个新 bug；一句「老大加油」没有位置问题，
+    /// 而且比一双眼睛更直接。要动画的地方交给饭点/偷吃。
+    func showEncouragement() {
+        guard settings.companyOn else { return }
+        // 正在说别的事就让一让，两分钟后再提 —— 不抢话
+        guard presenter.kind == .hidden || presenter.kind == .company else {
+            company?.deferEncouragement(by: 120)
+            return
+        }
+        let text = encourageLines[encourageIndex % encourageLines.count]
+        encourageIndex += 1
+        presenter.show(.company)
+        floatWindow?.whaleView.setCompanyCaption(text)
+    }
+
+    @objc func toggleCompany() {
+        settings.companyOn.toggle()
+        settings.save()
+        startCompanyWatcherIfNeeded()
+        if !settings.companyOn, presenter.kind == .company { presenter.hideNow() }
+    }
+
+    /// 菜单「说一句加油」：不想等 20 分钟时的预览入口。
+    @objc func tryCompany() { showEncouragement() }
 
     /// 跳到 DSH 的界面（不负责启动）。
     ///
@@ -594,6 +734,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             } else {
                 win.orderFrontRegardless()
             }
+            // 桌宠藏起来时也停掉「忙久了」的计时：看不见它说话，说了也没意义
+            company?.enabled = win.isVisible
             return
         }
         // 浮窗还没建（启动时缺素材）—— 素材到位了就地补建
@@ -871,6 +1013,122 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         snackScheduledAt = nil
     }
 
+    // MARK: - 拖图解题（0.2.0 floatstudy）
+
+    /// 拖图之后的开场白。
+    ///
+    /// 「先思路、后答案」是刻意的：直接把答案倒出来对学习没帮助，
+    /// 但真做不出来也得有个结果，所以两样都给。
+    /// 图里信息不全时让它明说缺什么，而不是硬猜。
+    static let studyPrompt = """
+    我拖来一张截图，多半是道题。先看清题干、已知条件、要问什么，再动手解。
+    前几步只说思路，最后给答案；图里信息不全就直接讲缺什么，别猜。
+    """
+
+    /// 收到一张拖进来的图。
+    ///
+    /// 开新会话而不是塞进当前对话：看图是个独立任务，
+    /// 混在正在聊的内容里会把两条线索搅在一起。
+    /// DSH 没在跑时先拉起来（不开浏览器），等它能收消息了再递。
+    private func handleDroppedImage(_ url: URL) {
+        if presenter.kind != .company { presenter.show(.study) }
+        NSLog("WhaleFloat: 拖入图片 \(url.lastPathComponent)")
+
+        let send = { [weak self] in
+            guard self != nil else { return }
+            NotifyBridge.shared.beginNewSession(text: Self.studyPrompt, imagePath: url.path)
+        }
+
+        if DSHLauncher.isRunning {
+            send()
+            return
+        }
+        NSLog("WhaleFloat: 拖图时 DSH 没在跑，先冷启动")
+        DSHLauncher.launch(openBrowser: false)
+        waitForDSHReady(timeout: 120) { [weak self] ok in
+            guard let self else { return }
+            if ok {
+                send()
+            } else {
+                self.alert("DSH 没起来",
+                           "图已经存在 \(url.path)，但等了两分钟仍连不上 3080。")
+            }
+        }
+    }
+
+    /// 菜单里的「选一张图解题…」：拖不动的时候的备用入口。
+    @objc func chooseImageForStudy() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.png, .jpeg, .gif, .tiff, .webP, .heic]
+        panel.message = "选一张截图，让小鲸鱼看看"
+        guard panel.runModal() == .OK, let src = panel.url else { return }
+        // 与拖拽走同一条落盘链路，后面只有一条分支要维护
+        guard let img = NSImage(contentsOf: src),
+              let url = DroppedImageStore.save(img, preferredName: src.deletingPathExtension().lastPathComponent) else {
+            alert("这张图读不出来", src.lastPathComponent, style: .informational)
+            return
+        }
+        handleDroppedImage(url)
+    }
+
+    // MARK: - 动画（0.2.0）
+
+    @objc func toggleAnimationOn() {
+        settings.animationOn.toggle()
+        settings.save()
+        if !settings.animationOn {
+            floatWindow?.whaleView.stopAnimation()
+        }
+    }
+
+    /// 菜单里选某个触发条件用哪个动画（空字符串 = 不播放）。
+    @objc func chooseAnimation(_ sender: NSMenuItem) {
+        let name = (sender.representedObject as? String) ?? ""
+        guard let trigger = AnimationTrigger.allCases.first(where: { $0.menuTag == sender.tag })
+        else { return }
+        switch trigger {
+        case .meal: settings.animationMeal = name
+        case .snack: settings.animationSnack = name
+        }
+        settings.save()
+        NSLog("WhaleFloat: 动画触发 \(trigger.rawValue) → \(name.isEmpty ? "不播放" : name)")
+    }
+
+    /// 菜单里手动播一次。
+    @objc func playAnimationOnce(_ sender: NSMenuItem) {
+        guard let name = sender.representedObject as? String else { return }
+        guard floatWindow?.whaleView.playAnimation(named: name) == true else { return }
+        presenter.show(.animation)
+    }
+
+    @objc func rescanAnimations() {
+        let assets = AnimationCatalog.shared.reload()
+        let good = assets.filter(\.isUsable)
+        let bad = assets.filter { !$0.isUsable }
+        var lines = ["可用 \(good.count) 个："]
+        lines += good.map { "  · \($0.title)（\($0.source == .builtin ? "内置" : "自选")，\($0.kind == .gif ? "GIF" : "HTML")\($0.kind == .gif ? "，\($0.frameCount) 帧 / \(String(format: "%.1f", $0.duration)) 秒" : ""))" }
+        if !bad.isEmpty {
+            lines.append("")
+            lines.append("不可用 \(bad.count) 个：")
+            lines += bad.map { "  · \($0.name) —— \($0.problem ?? "未知原因")" }
+        }
+        lines.append("")
+        lines.append("目录：\(Settings.animationsDir.path)")
+        let a = NSAlert()
+        a.messageText = "动画兼容性检查"
+        a.informativeText = lines.joined(separator: "\n")
+        a.addButton(withTitle: "好")
+        a.runModal()
+    }
+
+    @objc func openAnimationDir() {
+        try? FileManager.default.createDirectory(at: Settings.animationsDir,
+                                                 withIntermediateDirectories: true)
+        NSWorkspace.shared.open(Settings.animationsDir)
+    }
+
     /// 静置够久就排一次偷吃，到点再演。
     ///
     /// 为什么要随机：固定时刻看着像定时任务。落在接下来半小时里的
@@ -941,7 +1199,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // 吃饭/偷吃泡的内容是动画，别用余额文字把它刷掉
         if presenter.isVisible,
            presenter.kind != .meal,
-           presenter.kind != .snack {
+           presenter.kind != .snack,
+           presenter.kind != .animation,
+           presenter.kind != .company,
+           presenter.kind != .study {
             renderBubbleContent()
         }
 
@@ -956,7 +1217,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             lastSeenTurnTS = latestTS
             // 一轮刚结束 → 顺便记一次活动，并把排好的偷吃作废
             noteActivity()
-            presenter.show(.turn)
+            // 这个开关以前一直没被读，写进设置也不生效
+            if settings.turnCostBubble { presenter.show(.turn) }
         }
     }
 
@@ -997,6 +1259,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 按当前气泡类型填充内容。
     private func renderBubbleContent() {
         guard let view = floatWindow?.whaleView else { return }
+        // 这两种泡的内容不走余额渲染，别让 update() 把字覆盖掉
+        switch presenter.kind {
+        case .study:
+            view.applyKind(.study)
+            view.setStudyCaption("看图去…")
+            return
+        case .company:
+            view.applyKind(.company)
+            view.setCompanyCaption(encourageLines[0])
+            return
+        case .animation:
+            // 手动播放：气泡里只放动画，没有文字
+            view.applyKind(.animation)
+            return
+        default:
+            break
+        }
         let ledger = TurnLedger.load()
         let now = Date()
         let latest = ledger?.events?.max { $0.ts < $1.ts }

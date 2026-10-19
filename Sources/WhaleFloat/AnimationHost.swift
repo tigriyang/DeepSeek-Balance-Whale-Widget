@@ -1,42 +1,52 @@
 import AppKit
 import WebKit
 
-/// 播放一个 HTML 动画。
+/// 播放一个动画：HTML 走 WebKit，GIF 走 ImageView。
 ///
-/// 为什么用 WebKit 而不是自己画：动画是要给「创意工坊」用的 ——
+/// 为什么 HTML 用 WebKit 而不是自己画：动画是给「创意工坊」用的 ——
 /// 用户拿 AI 生成一个透明背景的 HTML 丢进目录就能跑。
 /// canvas 是 AI 最熟的绘图 API，比让它手写贝塞尔坐标靠谱得多。
 ///
-/// 尺寸由外部给定（浮窗里是 40×40 点），动画自己按 200×200 画再缩放。
+/// 为什么 GIF 不用 WebKit：一张几十帧的 GIF 塞进 WKWebView 要建一个
+/// 进程级的浏览上下文，代价远大于它带来的兼容性。ImageIO 本来就会解 GIF，
+/// NSImageView 也本来就会循环播放，直接用更省。
+///
+/// 尺寸由外面的气泡栈决定（它给多少就画多少），这里只负责填满。
 final class AnimationHost: NSView {
     private var webView: WKWebView?
-    private var currentName: String?
+    private var gifView: NSImageView?
+    private var currentKey: String?
 
     override var isFlipped: Bool { false }
-    /// 跟一行 12pt 的文字并排，别画太大
-    override var intrinsicContentSize: NSSize { NSSize(width: 40, height: 40) }
 
-    /// WKWebView 不参与 Auto Layout，跟着容器走就行。
-    /// 放进 NSStackView 时它拿不到合适的初始尺寸，这里每次布局都对齐一次。
+    /// 子视图不进 Auto Layout，跟着 bounds 走。
     override func layout() {
         super.layout()
         webView?.frame = bounds
+        gifView?.frame = bounds
     }
 
-
-
-    /// 播放目录里的某个动画。找不到就什么都不做。
-    func play(_ name: String) {
-        guard let url = Self.locate(name) else {
-            NSLog("WhaleFloat: 找不到动画 \(name)")
+    /// 播一个已经过兼容性检查的动画。
+    func play(_ asset: AnimationAsset) {
+        guard asset.isUsable else {
+            NSLog("WhaleFloat: 动画不可用 \(asset.name) —— \(asset.problem ?? "")")
             return
         }
+        switch asset.kind {
+        case .html: playHTML(asset)
+        case .gif: playGIF(asset)
+        }
+    }
+
+    private func playHTML(_ asset: AnimationAsset) {
         // 同一个动画重复播放时不用重建 WebView，直接重载页面即可
-        if currentName == name, let web = webView {
+        if currentKey == asset.url.path, let web = webView {
+            teardownGIF()
             web.reload()
             return
         }
-        webView?.removeFromSuperview()
+        teardown()
+        currentKey = asset.url.path
 
         let config = WKWebViewConfiguration()
         config.suppressesIncrementalRendering = false
@@ -47,33 +57,42 @@ final class AnimationHost: NSView {
         web.autoresizingMask = [.width, .height]
         // 不让用户拖动、选中、右键出菜单 —— 它只是个画布
         web.allowsMagnification = false
-        web.isHidden = false
         addSubview(web)
-        web.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        web.loadFileURL(asset.url, allowingReadAccessTo: asset.url.deletingLastPathComponent())
 
         webView = web
-        currentName = name
+    }
+
+    private func playGIF(_ asset: AnimationAsset) {
+        teardown()
+        currentKey = asset.url.path
+
+        let iv = NSImageView(frame: bounds)
+        iv.imageScaling = .scaleProportionallyUpOrDown
+        iv.imageAlignment = .alignCenter
+        iv.wantsLayer = true
+        iv.layer?.backgroundColor = NSColor.clear.cgColor
+        iv.animates = true
+        iv.image = NSImage(contentsOf: asset.url)
+        addSubview(iv)
+        gifView = iv
     }
 
     func stop() {
-        webView?.removeFromSuperview()
-        webView = nil
-        currentName = nil
+        teardown()
+        currentKey = nil
     }
 
-    /// 动画来源：先看用户目录，再看包内。
-    ///
-    /// 用户目录优先，这样创意工坊的东西可以覆盖自带的那几个，
-    /// 而不必改 app 本身。
-    private static func locate(_ name: String) -> URL? {
-        let fm = FileManager.default
-        let home = fm.homeDirectoryForCurrentUser
-        var candidates: [URL] = [
-            home.appendingPathComponent(".dsh/whalefloat-animations/\(name)/index.html"),
-        ]
-        if let res = Bundle.main.resourceURL {
-            candidates.append(res.appendingPathComponent("animations/\(name)/index.html"))
-        }
-        return candidates.first { fm.fileExists(atPath: $0.path) }
+    private func teardown() {
+        webView?.removeFromSuperview()
+        webView = nil
+        teardownGIF()
+    }
+
+    private func teardownGIF() {
+        gifView?.animates = false
+        gifView?.image = nil
+        gifView?.removeFromSuperview()
+        gifView = nil
     }
 }

@@ -13,6 +13,9 @@ import AppKit
 @MainActor
 enum MenuBuilder {
     static func build(target: AppDelegate) -> NSMenu {
+        // 用户可能刚往动画目录里丢了一张 GIF —— 目录变了就重扫，
+        // 菜单里立刻能看到，不用重启。
+        AnimationCatalog.shared.refreshIfDirectoryChanged()
         let m = NSMenu()
         m.autoenablesItems = false
 
@@ -33,7 +36,39 @@ enum MenuBuilder {
         hint(pet, "约 0.18 秒后松开的那一声，可以不给")
         add(pet, "获取仓库素材…", #selector(AppDelegate.openAssetSource), target)
         hint(pet, "去上游页面挑，下载后放回素材目录")
+        pet.addItem(.separator())
+        add(pet, "选一张图解题…", #selector(AppDelegate.chooseImageForStudy), target)
+        hint(pet, "也可以直接把截图拖到我身上")
         m.addItem(submenu("桌宠设置", pet))
+
+        // ── 动画（0.2.0 创意工坊 + floatcompany）──
+        let anim = NSMenu()
+        add(anim, "启用动画", #selector(AppDelegate.toggleAnimationOn), target,
+            checked: target.settings.animationOn)
+        add(anim, "忙久了说句加油", #selector(AppDelegate.toggleCompany), target,
+            checked: target.settings.companyOn)
+        hint(anim, "只读按键间隔，不读你打了什么")
+        anim.addItem(.separator())
+        for trigger in AnimationTrigger.allCases {
+            let sub = NSMenu()
+            addAnimationChoice(sub, trigger: trigger, target: target)
+            anim.addItem(submenu(trigger.title, sub))
+        }
+        anim.addItem(.separator())
+        let playOnce = NSMenu()
+        let all = AnimationCatalog.shared.usable
+        if all.isEmpty {
+            hint(playOnce, "还没有可用动画")
+        }
+        for a in all {
+            add(playOnce, a.title, #selector(AppDelegate.playAnimationOnce), target,
+                key: nil, represented: a.name)
+        }
+        anim.addItem(submenu("播放一次", playOnce))
+        add(anim, "重新检查兼容性…", #selector(AppDelegate.rescanAnimations), target)
+        add(anim, "打开动画目录", #selector(AppDelegate.openAnimationDir), target)
+        add(anim, "说一句加油", #selector(AppDelegate.tryCompany), target)
+        m.addItem(submenu("动画", anim))
 
         // ── 高级设置 ──
         let adv = NSMenu()
@@ -93,6 +128,37 @@ enum MenuBuilder {
         m.addItem(item)
     }
 
+    /// 一个触发条件的动画选择子菜单。
+    private static func addAnimationChoice(_ m: NSMenu, trigger: AnimationTrigger,
+                                           target: AppDelegate) {
+        let current = currentAnimation(trigger, target.settings)
+        add(m, "不播放", #selector(AppDelegate.chooseAnimation), target,
+            checked: current.isEmpty, represented: "")
+        m.addItem(.separator())
+        let usable = AnimationCatalog.shared.usable
+        if usable.isEmpty {
+            hint(m, "还没有可用动画，见「打开动画目录」")
+            return
+        }
+        for a in usable {
+            add(m, a.title, #selector(AppDelegate.chooseAnimation), target,
+                checked: a.name == current, represented: a.name, tag: trigger.menuTag)
+        }
+        let broken = AnimationCatalog.shared.broken
+        if !broken.isEmpty {
+            m.addItem(.separator())
+            hint(m, "有 \(broken.count) 个文件没通过兼容性检查")
+        }
+    }
+
+    private static func currentAnimation(_ trigger: AnimationTrigger,
+                                         _ s: Settings) -> String {
+        switch trigger {
+        case .meal: return s.animationMeal
+        case .snack: return s.animationSnack
+        }
+    }
+
     private static func submenu(_ title: String, _ menu: NSMenu) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         item.submenu = menu
@@ -101,9 +167,12 @@ enum MenuBuilder {
 
     private static func add(_ m: NSMenu, _ title: String, _ sel: Selector,
                             _ target: AnyObject, checked: Bool = false,
-                            key: String? = nil) {
+                            key: String? = nil,
+                            represented: String? = nil, tag: Int = 0) {
         let item = NSMenuItem(title: title, action: sel, keyEquivalent: key ?? "")
         item.target = target
+        item.representedObject = represented
+        item.tag = tag
         // 勾选状态用系统的那一套，而不是自己在标题里拼「✓」
         item.state = checked ? .on : .off
         if key != nil {

@@ -27,7 +27,7 @@ enum PluginInstaller {
     static let descriptions: [String: String] = [
         "dsh-wait-state": "等用户回答 / 授权时，让浮窗冒泡提示",
         "dsh-turn-usage": "采集每轮对话消耗，供浮窗显示¥金额",
-        "dsh-whalefloat-helper": "等待提示 / 每轮消耗 / 系统通知，三合一中介",
+        "dsh-whalefloat-helper": "等待提示 / 每轮消耗 / 系统通知 / 拖图解题，四合一中介",
     ]
 
     static var pluginsDir: URL {

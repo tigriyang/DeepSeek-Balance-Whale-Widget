@@ -24,7 +24,11 @@ enum AppInfo {
     ///
     /// **只被 build-app.sh 读取**，用来写进 Info.plist —— 运行时不读它。
     /// 改这里之后必须重新跑构建，Finder 与菜单里显示的版本才会跟着变。
-    static let version = "0.1.12"
+    ///
+    /// 带后缀（-alpha / -beta）是有意的：0.2.0 分两步交付，
+    /// 先让功能跑起来叫 alpha，全功能自测一轮之后再改 beta。
+    /// 构建脚本按整串读取，不会把后缀吃掉。
+    static let version = "0.2.0-beta"
 }
 
 /// 外部链接。

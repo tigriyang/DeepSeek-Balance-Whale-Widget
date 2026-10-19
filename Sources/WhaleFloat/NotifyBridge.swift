@@ -221,8 +221,9 @@ final class NotifyBridge: NSObject, UNUserNotificationCenterDelegate {
     ///
     /// 首条用「你好」—— 它不是给用户看的，作用只是让 DSH 开口。
     /// 等 DSH 回完，正常的通知链路就接上了，用户可以直接在通知里回。
-    func beginNewSession(text: String = "你好") {
-        writeReply(text: text, sessionId: "", newSession: true)
+    /// 起一次新对话；`imagePath` 非空时把这张图也带上（floatstudy）。
+    func beginNewSession(text: String = "你好", imagePath: String? = nil) {
+        writeReply(text: text, sessionId: "", newSession: true, imagePath: imagePath)
     }
 
     /// 下一个序号。
@@ -241,14 +242,19 @@ final class NotifyBridge: NSObject, UNUserNotificationCenterDelegate {
         return replySeq
     }
 
-    private func writeReply(text: String, sessionId: String, newSession: Bool = false) {
-        let payload: [String: Any] = [
+    private func writeReply(text: String, sessionId: String,
+                            newSession: Bool = false, imagePath: String? = nil) {
+        var payload: [String: Any] = [
             "seq": nextSeq(),
             "text": text,
             "sessionId": sessionId,
             "newSession": newSession,
             "ts": Date().timeIntervalSince1970 * 1000,
         ]
+        // 只递路径，不在这里转 base64 ——
+        // JSON 文件是轮询读的，塞几十兆 base64 会把 poller 拖慢；
+        // 读文件、验格式交给插件那边一次做完。
+        if let imagePath, !imagePath.isEmpty { payload["image"] = imagePath }
         do {
             let data = try JSONSerialization.data(withJSONObject: payload)
             try data.write(to: Self.replyFile)

@@ -18,8 +18,9 @@ BUNDLE_ID="ai.dsh.whalefloat"
 # 原先在 Menu.swift —— 拆分文件后这里的路径没跟着改，
 # 读不到就回退成 0.1.0，Finder 里于是看到旧版本。
 # 用 grep -r 扫整个源码目录，以后再搬家也不会失效。
-VERSION="$(grep -rhoE 'static let version = "[0-9.]+"' "$HERE/Sources/WhaleFloat/" 2>/dev/null \
-  | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
+# 版本号整串读取，允许 -alpha / -beta 后缀。0.2.0 分期交付靠的就是这个后缀。
+VERSION="$(grep -rhoE 'static let version = "[^"]+"' "$HERE/Sources/WhaleFloat/" 2>/dev/null \
+  | head -1 | sed -E 's/.*"([^"]+)".*/\1/')"
 [ -z "$VERSION" ] && VERSION="0.1.0"
 # 装到系统的 /Applications —— Finder 侧边栏「应用程序」指向的是这里，
 # 装到 ~/Applications 的话在侧边栏里看不到，也不符合拖进「应用程序」的直觉。

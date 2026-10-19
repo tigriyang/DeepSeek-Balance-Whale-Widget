@@ -19,8 +19,9 @@ DIST="$HERE/dist"
 # 版本号从源码取。用 grep -r 扫整个目录 ——
 # 它原先在 Menu.swift，随 AppInfo 拆出去后这里读不到，静默回退成 0.1.0，
 # 于是 dmg 名字永远是旧的。
-VERSION="$(grep -rhoE 'static let version = "[0-9.]+"' "$HERE/Sources/WhaleFloat/" 2>/dev/null \
-  | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
+# 与 build-app.sh 一致：整串版本号（含 -alpha / -beta 后缀）。
+VERSION="$(grep -rhoE 'static let version = "[^"]+"' "$HERE/Sources/WhaleFloat/" 2>/dev/null \
+  | head -1 | sed -E 's/.*"([^"]+)".*/\1/')"
 [ -z "$VERSION" ] && VERSION="0.1.0"
 
 OUT="$DIST/${APP_NAME}-${VERSION}.dmg"
