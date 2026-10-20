@@ -342,6 +342,11 @@ WhaleFloat.app                Swift 6 + AppKit 原生程序
 这是做这次移植的前提。用 fork 而不是另建仓库，是为了让这份继承
 关系在 GitHub 上始终可见 —— **语言变了，源头没变**。
 
+但**不跟踪上游提交**：上游是 JS 网页插件，本仓库是 macOS 独立应用；
+不 merge、不 rebase、不向上游发 PR，只按需移植界面与交互修复。
+规则写在 [docs/upstream-policy.md](docs/upstream-policy.md)，
+`tools/upstream-review.sh` 用来定期列出上游相关提交。
+
 上游的 JS 实现已从本分支移除。现在仓库里是移植后的 Swift 代码，
 外加一个挂在 DSH 进程里的中介插件 `plugins/dsh-whalefloat-helper`（JS），
 两者之间只通过 `~/.dsh` 下的几个 JSON 文件通信。
