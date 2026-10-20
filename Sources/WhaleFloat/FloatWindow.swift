@@ -277,6 +277,11 @@ struct Settings: Codable {
     var animationMeal: String = "hungry"
     /// 静置偷吃时播放的动画名。
     var animationSnack: String = "meal"
+    /// 静置多少分钟后演一次「偷吃」。
+    ///
+    /// 以前写死 30 分钟（还要再随机等 0–30 分钟），结果几乎没人见过它触发。
+    /// 现在默认 5 分钟、可在菜单里改，0 表示不演。
+    var snackIdleMinutes: Double = 5
 
     // ── 版本 ────────────────────────────────────────────
     /// 上一次运行时的版本。用来区分「升级」与「首次运行」。
@@ -353,6 +358,7 @@ struct Settings: Codable {
         animationOn = get(.animationOn, true)
         animationMeal = get(.animationMeal, "hungry")
         animationSnack = get(.animationSnack, "meal")
+        snackIdleMinutes = max(0, get(.snackIdleMinutes, 5))
         lastVersion = get(.lastVersion, "")
         lastSigningToken = get(.lastSigningToken, "")
         companyOn = get(.companyOn, true)

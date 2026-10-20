@@ -28,7 +28,7 @@ enum AppInfo {
     /// 带后缀（-alpha / -beta）是有意的：0.2.0 分两步交付，
     /// 先让功能跑起来叫 alpha，全功能自测一轮之后再改 beta。
     /// 构建脚本按整串读取，不会把后缀吃掉。
-    static let version = "0.2.0-beta.1"
+    static let version = "0.2.0-beta.2"
 }
 
 /// 外部链接。

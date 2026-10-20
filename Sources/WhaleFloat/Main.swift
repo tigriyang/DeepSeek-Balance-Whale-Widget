@@ -18,6 +18,7 @@ import Foundation
 ///   --drop PATH   启动后走一遍拖图解题流程（自测用）
 ///   --drop-copy PATH  按真实落盘链路走一遍拖图解题（自测用）
 ///   --animations-report  打印动画清单与兼容性检查结果后退出（自测用）
+///   --animation-selftest 把每个动画离屏渲染一遍，统计非透明像素（自测用）
 ///   --quit        把正在跑的那一份关掉
 @main
 enum WhaleFloatApp {
@@ -31,6 +32,10 @@ enum WhaleFloatApp {
         if args.contains("--animations-report") {
             printAnimationsReport()
             return
+        }
+        if args.contains("--animation-selftest") {
+            _ = NSApplication.shared
+            exit(AnimationSelfTest.run())
         }
         if args.contains("--frames-report") {
             _ = NSApplication.shared

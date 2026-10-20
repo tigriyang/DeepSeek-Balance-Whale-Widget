@@ -53,33 +53,50 @@ enum MenuBuilder {
         m.addItem(submenu("桌宠设置", pet))
 
         // ── 动画（0.2.0 创意工坊 + floatcompany）──
+        //
+        // 排布原则：想「马上看一眼」的放最上面 —— 动画是彩蛋，光靠等
+        // 很难判断它到底有没有在工作。开关和触发时机归一组，维护项归一组。
         let anim = NSMenu()
-        add(anim, "启用动画", #selector(AppDelegate.toggleAnimationOn), target,
-            checked: target.settings.animationOn)
-        add(anim, "忙久了说句加油", #selector(AppDelegate.toggleCompany), target,
-            checked: target.settings.companyOn)
-        hint(anim, "只读按键间隔，不读你打了什么")
-        anim.addItem(.separator())
-        for trigger in AnimationTrigger.allCases {
-            let sub = NSMenu()
-            addAnimationChoice(sub, trigger: trigger, target: target)
-            anim.addItem(submenu(trigger.title, sub))
-        }
-        anim.addItem(.separator())
         let playOnce = NSMenu()
         let all = AnimationCatalog.shared.usable
         if all.isEmpty {
-            hint(playOnce, "还没有可用动画")
+            hint(playOnce, "还没有可用动画，见下面「打开动画目录」")
         }
         for a in all {
             add(playOnce, a.title, #selector(AppDelegate.playAnimationOnce), target,
                 key: nil, represented: a.name)
         }
         anim.addItem(submenu("播放一次", playOnce))
+        anim.addItem(.separator())
+
+        add(anim, "启用动画", #selector(AppDelegate.toggleAnimationOn), target,
+            checked: target.settings.animationOn)
+        for trigger in AnimationTrigger.allCases {
+            let sub = NSMenu()
+            addAnimationChoice(sub, trigger: trigger, target: target)
+            anim.addItem(submenu(trigger.title, sub))
+        }
+        let idle = NSMenu()
+        let minutes = target.settings.snackIdleMinutes
+        add(idle, "不演", #selector(AppDelegate.setSnackIdleOff), target, checked: minutes <= 0)
+        add(idle, "静置 5 分钟后", #selector(AppDelegate.setSnackIdle5), target,
+            checked: minutes > 0 && minutes < 20)
+        add(idle, "静置 30 分钟后", #selector(AppDelegate.setSnackIdle30), target,
+            checked: minutes >= 20)
+        anim.addItem(submenu("多久演一次", idle))
+        anim.addItem(.separator())
+
+        add(anim, "忙久了说句加油", #selector(AppDelegate.toggleCompany), target,
+            checked: target.settings.companyOn)
+        hint(anim, "只读按键间隔，不读你打了什么")
+        add(anim, "现在就试一句", #selector(AppDelegate.tryCompany), target)
+        anim.addItem(.separator())
+
         add(anim, "重新检查兼容性…", #selector(AppDelegate.rescanAnimations), target)
         add(anim, "打开动画目录", #selector(AppDelegate.openAnimationDir), target)
-        add(anim, "说一句加油", #selector(AppDelegate.tryCompany), target)
         m.addItem(submenu("动画", anim))
+
+        m.addItem(.separator())
 
         // ── 常用动作 ──
         add(m, "看图解题…", #selector(AppDelegate.chooseImageForStudy), target)
@@ -89,9 +106,6 @@ enum MenuBuilder {
         add(m, "启动 DSH GUI", #selector(AppDelegate.launchDSH), target, key: "3")
         add(m, "新的对话", #selector(AppDelegate.startNewConversation), target)
         add(m, "充值 / 查看用量…", #selector(AppDelegate.openBilling), target, key: "4")
-        m.addItem(.separator())
-        add(m, "退出浮窗", #selector(AppDelegate.quit), target, key: "5")
-        add(m, "退出 DSH", #selector(AppDelegate.quitEverything), target, key: "6")
         m.addItem(.separator())
 
         // ── 高级设置：安装、素材、卸载 ──
@@ -114,6 +128,11 @@ enum MenuBuilder {
         // 拖进废纸篓也能删掉本体，但 launchd 配置和 DSH 插件会留下。
         add(adv, "卸载 WhaleFloat…", #selector(AppDelegate.uninstallSelf), target)
         m.addItem(submenu("高级设置", adv))
+
+        // 退出放最后：它挨在「新的对话」「充值」旁边时，手一滑就点错了。
+        m.addItem(.separator())
+        add(m, "退出浮窗", #selector(AppDelegate.quit), target, key: "5")
+        add(m, "退出 DSH", #selector(AppDelegate.quitEverything), target, key: "6")
 
         // 版本号：从 Info.plist 读，与 Finder 里看到的一致。
         // 原先 AppInfo.version 这个常量根本没人读，改它也不影响任何显示 ——

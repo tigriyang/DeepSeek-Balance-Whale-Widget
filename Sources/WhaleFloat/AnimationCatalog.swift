@@ -20,7 +20,7 @@ enum AnimationTrigger: String, CaseIterable {
     var title: String {
         switch self {
         case .meal: return "饭点时"
-        case .snack: return "偷吃时"
+        case .snack: return "静置时"
         }
     }
 }

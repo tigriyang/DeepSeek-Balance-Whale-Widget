@@ -1095,9 +1095,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 已经排好的偷吃时刻。nil 表示还没排（或刚被取消）。
     private var snackScheduledAt: Date?
 
-    /// 静置多久之后开始惦记偷吃。排期也用这个长度。
-    private let snackIdle: TimeInterval = 30 * 60
-
     /// 记一次活动。
     ///
     /// 唯一的判据是「DSH 有没有新东西推过来」—— 不看你有没有点它。
@@ -1185,6 +1182,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         settings.save()
         NSLog("WhaleFloat: 动画触发 \(trigger.rawValue) → \(name.isEmpty ? "不播放" : name)")
+    }
+
+    /// 菜单「多久演一次」：关 / 5 分钟 / 30 分钟。
+    @objc func setSnackIdleOff() { setSnackIdleMinutes(0) }
+    @objc func setSnackIdle5() { setSnackIdleMinutes(5) }
+    @objc func setSnackIdle30() { setSnackIdleMinutes(30) }
+
+    private func setSnackIdleMinutes(_ minutes: Double) {
+        settings.snackIdleMinutes = minutes
+        settings.save()
+        snackScheduledAt = nil      // 改了时长，之前排的那次作废
+        NSLog("WhaleFloat: 静置触发改为 %@", minutes <= 0 ? "关闭" : "静置 \(Int(minutes)) 分钟")
     }
 
     /// 菜单里手动播一次。
@@ -1300,13 +1309,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSWorkspace.shared.open(Settings.animationsDir)
     }
 
-    /// 静置够久就排一次偷吃，到点再演。
+    /// 静置够久就演一次偷吃。
     ///
-    /// 为什么要随机：固定时刻看着像定时任务。落在接下来半小时里的
-    /// 任意一点，才像它自己拿的主意。
+    /// 以前的规则是「静置 30 分钟 + 再随机等 0–30 分钟」，实际等于一小时内
+    /// 不能碰鼠标键盘才有机会 —— 谁也撞不上，动画于是从来没出现过。
+    ///
+    /// 现在：静置时长由设置给（默认 5 分钟，0 = 不演），排到的时机最多再等
+    /// 两分钟。保留一点随机，是为了别像整点定时任务那样机械。
     private func checkSecretSnack() {
+        let idleNeeded = settings.snackIdleMinutes * 60
+        guard idleNeeded > 0 else {
+            snackScheduledAt = nil
+            return
+        }
         let idle = Date().timeIntervalSince(lastActivityAt)
-        guard idle >= snackIdle else {
+        guard idle >= idleNeeded else {
             snackScheduledAt = nil     // 还没闲够，之前排的作废
             return
         }
@@ -1317,13 +1334,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             lastActivityAt = Date()    // 吃完重新计时，免得紧接着又吃
             guard floatWindow != nil else { return }
             presenter.show(.snack)
-            NSLog("WhaleFloat: 偷吃一顿")
+            NSLog("WhaleFloat: 静置 \(Int(idle / 60)) 分钟，演一次偷吃")
             return
         }
 
-        let delay = Double.random(in: 0...snackIdle)
+        let delay = Double.random(in: 0...120)
         snackScheduledAt = Date().addingTimeInterval(delay)
-        NSLog("WhaleFloat: 静置满 30 分钟，\(Int(delay / 60)) 分钟后偷吃")
+        NSLog("WhaleFloat: 静置满 \(Int(idleNeeded / 60)) 分钟，\(Int(delay)) 秒后偷吃")
     }
 
     /// 到点冒个「干饭」泡。
@@ -1336,10 +1353,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let comps = Calendar.current.dateComponents([.hour, .minute, .day, .month, .year], from: now)
         guard let h = comps.hour, let m = comps.minute else { return false }
 
+        // 窗口放宽到「饭点前后」：午饭 11:30–13:00、晚饭 17:00–19:00。
+        // 原先只留两分钟（12:00–12:01、17:29–17:31），app 不在那一刻运行就
+        // 彻底错过 —— 这是动画「从来没出现过」的另一个原因。
+        let minutes = h * 60 + m
         let slot: String
-        if h == 12 && m <= 1 {
+        if minutes >= 11 * 60 + 30 && minutes <= 13 * 60 {
             slot = "lunch"
-        } else if h == 17 && m >= 29 && m <= 31 {
+        } else if minutes >= 17 * 60 && minutes <= 19 * 60 {
             slot = "dinner"
         } else {
             return false
