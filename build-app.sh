@@ -64,6 +64,12 @@ if [ -d "$HERE/Resources/holidays" ]; then
   echo "  内置节假日数据：$(ls "$HERE/Resources/holidays" | tr '\n' ' ')"
 fi
 
+# 素材来源与许可 —— 包内带素材，这份说明要跟着走
+if [ -f "$HERE/NOTICE-ASSETS.md" ]; then
+  cp "$HERE/NOTICE-ASSETS.md" "$DEST/Contents/Resources/NOTICE-assets.md"
+  echo "  素材说明：NOTICE-assets.md"
+fi
+
 # 内置 launchd 模板 —— 首次运行时程序自己装自启，
 # 这样从 DMG 拖进「应用程序」就能用，不需要再跑 install.sh。
 cp "$HERE/ai.dsh.whalefloat.plist" "$DEST/Contents/Resources/launchagent.plist"

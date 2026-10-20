@@ -319,7 +319,7 @@ struct Settings: Codable {
         lowBalanceWarn = get(.lowBalanceWarn, 0)
         dailyBudget = get(.dailyBudget, 0)
         soundOn = get(.soundOn, true)
-        soundVolume = get(.soundVolume, 0.9)
+        soundVolume = min(1, max(0, get(.soundVolume, 0.9)))
         animationOn = get(.animationOn, true)
         animationMeal = get(.animationMeal, "hungry")
         animationSnack = get(.animationSnack, "meal")

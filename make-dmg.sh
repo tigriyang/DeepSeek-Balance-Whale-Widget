@@ -43,6 +43,10 @@ trap 'rm -rf "$STAGE"' EXIT
 cp -R "$APP" "$STAGE/"
 # 指向 /Applications 的快捷方式 —— 用户拖进去即可
 ln -s /Applications "$STAGE/应用程序"
+# 素材来源与许可 —— 放在安装盘根部，不打开应用也能看到
+if [ -f "$HERE/NOTICE-ASSETS.md" ]; then
+  cp "$HERE/NOTICE-ASSETS.md" "$STAGE/素材来源与许可.md"
+fi
 
 echo "▸ 生成 DMG…"
 hdiutil create \

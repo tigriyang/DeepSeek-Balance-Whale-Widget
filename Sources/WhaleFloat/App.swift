@@ -319,6 +319,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         view.showsValley = settings.showValley
         view.showsClock = settings.showClock
         view.setSoundEnabled(settings.soundOn)
+        view.setSoundVolume(settings.soundVolume)
         view.reloadImages(characterName: settings.characterName)
         presenter.autoHideSeconds = settings.bubbleSeconds
         win.snapEnabled = settings.snapEnabled
@@ -505,6 +506,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         floatWindow?.whaleView.showsClock = settings.showClock
     }
 
+    @objc func setVolume100() { applySoundVolume(1.0) }
+    @objc func setVolume60() { applySoundVolume(0.6) }
+    @objc func setVolume30() { applySoundVolume(0.3) }
+
+    private func applySoundVolume(_ v: Double) {
+        settings.soundVolume = v
+        settings.save()
+        floatWindow?.whaleView.setSoundVolume(v)
+    }
+
     @objc func toggleSound() {
         settings.soundOn.toggle()
         settings.save()
@@ -642,6 +653,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             v.showsValley = s.showValley
             v.showsClock = s.showClock
             v.setSoundEnabled(s.soundOn)
+            v.setSoundVolume(s.soundVolume)
             // 换角色才重载素材（避免每次都读盘）
             if old.characterName != s.characterName {
                 v.reloadImages(characterName: s.characterName)
@@ -1121,6 +1133,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         a.informativeText = lines.joined(separator: "\n")
         a.addButton(withTitle: "好")
         a.runModal()
+    }
+
+    /// 菜单「素材来源与许可…」：优先打开包内那份，离线也能看。
+    @objc func openAssetNotice() {
+        if let url = Bundle.main.url(forResource: "NOTICE-assets", withExtension: "md") {
+            NSWorkspace.shared.open(url)
+            return
+        }
+        if let url = URL(string: "https://github.com/tigriyang/DeepSeek-Balance-Whale-Widget/blob/main/NOTICE-ASSETS.md") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     @objc func openAnimationDir() {

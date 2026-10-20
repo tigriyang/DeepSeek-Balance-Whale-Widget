@@ -17,6 +17,15 @@ final class TouchReaction {
     private var downSound: NSSound?
     private var upSound: NSSound?
     private var soundEnabled = true
+    /// 音量 0…1（设置里的 soundVolume 以前没有任何地方读它，是个死旋钮）。
+    private var volume: Float = 0.9
+    /// 每次按下自增；延迟的「回弹」拿旧序号就作废。
+    /// 快速连点时，上一下的回弹不能把这一下的形变收掉。
+    private var pressToken = 0
+    /// 上一次按下的时刻，用于判断「这是连点」。
+    private var lastPressAt: Date = .distantPast
+    /// 这一次按下是否属于连点（在 pressDown 里定，pressUp 里用）。
+    private var rapidPress = false
 
     /// 幅度照原作（scaleY .88 / scaleX 1.05），略加强一点让它更容易看清。
     private let squishY: CGFloat = 0.82
@@ -45,6 +54,13 @@ final class TouchReaction {
         if !on { downSound?.stop(); upSound?.stop() }
     }
 
+    /// 音量（0…1）。NSSound 的音量是 Float，超界会被系统夹。
+    func setVolume(_ v: Double) {
+        volume = Float(min(1, max(0, v)))
+        downSound?.volume = volume
+        upSound?.volume = volume
+    }
+
     /// 重新读盘上的音效（用户导入新素材后调用）。
     func reloadSounds() {
         downSound = Self.loadSound("press-down")
@@ -57,6 +73,9 @@ final class TouchReaction {
     func pressDown() {
         play(downSound)
         guard let host else { return }
+        pressToken += 1
+        rapidPress = Date().timeIntervalSince(lastPressAt) < 0.35
+        lastPressAt = Date()
         host.isSquishing = true
         scale(host.content, x: squishX, y: squishY,
               duration: pressSeconds, overshoot: false)
@@ -66,12 +85,18 @@ final class TouchReaction {
     func pressUp() {
         play(upSound)
         guard let host else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + holdSeconds) { [weak self] in
-            guard let self, let host = self.host else { return }
+        let token = pressToken
+        // 连点时缩短定格与回弹：否则每一下还没弹回来，下一巴掌又来了，
+        // 宠物会一直扁着（上游 v0.4.2 社区 PR #243 修的就是这个）。
+        let hold = rapidPress ? 0.05 : holdSeconds
+        let release = rapidPress ? 0.16 : releaseSeconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + hold) { [weak self] in
+            guard let self, let host = self.host, token == self.pressToken else { return }
             self.scale(host.content, x: 1, y: 1,
-                       duration: self.releaseSeconds, overshoot: true)
+                       duration: release, overshoot: true)
             // 形变结束后再解除标记，避免中途被 layout 重置
-            DispatchQueue.main.asyncAfter(deadline: .now() + self.releaseSeconds) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + release) {
+                guard token == self.pressToken else { return }
                 host.isSquishing = false
                 host.needsLayout = true
             }
@@ -102,6 +127,7 @@ final class TouchReaction {
 
     private func play(_ sound: NSSound?) {
         guard soundEnabled, let s = sound else { return }
+        s.volume = volume
         if s.isPlaying { s.stop() }
         s.play()
     }

@@ -39,6 +39,8 @@ enum MenuBuilder {
         pet.addItem(.separator())
         add(pet, "选一张图解题…", #selector(AppDelegate.chooseImageForStudy), target)
         hint(pet, "也可以直接把截图拖到我身上")
+        pet.addItem(.separator())
+        add(pet, "素材来源与许可…", #selector(AppDelegate.openAssetNotice), target)
         m.addItem(submenu("桌宠设置", pet))
 
         // ── 动画（0.2.0 创意工坊 + floatcompany）──
@@ -88,6 +90,12 @@ enum MenuBuilder {
             checked: target.settings.showClock)
         add(adv, "启用事件音效", #selector(AppDelegate.toggleSound), target,
             checked: target.settings.soundOn)
+        let vol = NSMenu()
+        let v = target.settings.soundVolume
+        add(vol, "100%", #selector(AppDelegate.setVolume100), target, checked: v >= 0.85)
+        add(vol, "60%", #selector(AppDelegate.setVolume60), target, checked: v >= 0.45 && v < 0.85)
+        add(vol, "30%", #selector(AppDelegate.setVolume30), target, checked: v < 0.45)
+        adv.addItem(submenu("音效音量", vol))
         add(adv, "拖到边缘时吸附", #selector(AppDelegate.toggleSnap), target,
             checked: target.settings.snapEnabled)
         m.addItem(submenu("高级设置", adv))

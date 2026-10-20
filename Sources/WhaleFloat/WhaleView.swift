@@ -276,6 +276,11 @@ final class WhaleView: NSView {
         touch?.setSoundEnabled(on)
     }
 
+    /// 音量（0…1，由设置驱动）。
+    func setSoundVolume(_ v: Double) {
+        touch?.setVolume(v)
+    }
+
     /// 角色水平镜像（贴左吸附时朝向屏幕内侧）。
     ///
     /// 只翻角色底图，**不动文字** —— 文字反着读没法看。
