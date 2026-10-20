@@ -276,7 +276,7 @@ struct Settings: Codable {
         return home.appendingPathComponent(".dsh/whalefloat-assets", isDirectory: true)
     }()
 
-    /// 拖进来的图片存放目录（floatstudy）。
+    /// 拖进来的图片存放目录（whale-study）。
     static let dropsDir: URL = {
         let home = FileManager.default.homeDirectoryForCurrentUser
         return home.appendingPathComponent(".dsh/whalefloat-drops", isDirectory: true)

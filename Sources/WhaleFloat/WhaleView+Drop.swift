@@ -1,8 +1,23 @@
 import AppKit
+import Foundation
+
+/// 拖拽诊断日志。用户说「拖上去没反应」时，先看这个文件停在哪一步。
+/// 只记录事件与类型名，不记录图片内容。
+func dragTrace(_ msg: String) {
+    let line = String(Date().timeIntervalSince1970) + " " + msg + "\n"
+    let url = URL(fileURLWithPath: "/tmp/whalefloat-drag.log")
+    if let h = try? FileHandle(forWritingTo: url) {
+        h.seekToEndOfFile()
+        h.write(line.data(using: .utf8)!)
+        try? h.close()
+    } else {
+        try? line.write(to: url, atomically: true, encoding: .utf8)
+    }
+}
 
 /// 接收拖到小鲸鱼身上的东西。
 ///
-/// 0.2.0 的 floatstudy：拖一张图进来，开一轮新对话把图递过去。
+/// 0.2.0 的 whale-study：拖一张图进来，开一轮新对话把图递过去。
 /// 只认图片 —— 别的文件拖进来什么也不做，免得误触。
 ///
 /// 图先落成 PNG 再走后面的链路：
@@ -13,20 +28,26 @@ extension WhaleView {
 
     /// 让这个视图能接住拖拽。
     ///
-    /// 只给 WhaleView 注册是不够的：它上面铺着一个 content 容器，
-    /// 容器里还有角色图和文字。拖拽落点如果命中那些子视图，
-    /// 事件不会冒泡上来 —— 得挨个注册一遍。
+    /// **只在 WhaleView 上注册，不给子视图注册。**
+    /// AppKit 把拖拽交给「光标下最深的、注册过该类型的视图」；
+    /// 子视图（角色图、气泡、文字）注册了却没有实现 draggingEntered，
+    /// 就会用 NSView 的默认实现直接拒绝 —— 拖到角色图上看起来毫无反应。
+    /// 只注册容器后，未注册的子视图会被穿透，消息落到 WhaleView 这里。
     func enableDropTarget() {
-        registerRecursively(self)
-    }
-
-    private func registerRecursively(_ v: NSView) {
-        v.registerForDraggedTypes([.fileURL, .tiff, .png])
-        for sub in v.subviews { registerRecursively(sub) }
+        // 子视图显式清一遍：有的 AppKit 控件会自己注册拖拽类型（例如 web 视图），
+        // 一旦它成了「最深的已注册视图」，拖拽就轮不到这里。
+        func clear(_ v: NSView) {
+            v.registerForDraggedTypes([])
+            for sub in v.subviews { clear(sub) }
+        }
+        clear(self)
+        registerForDraggedTypes([.fileURL, .tiff, .png])
+        dragTrace("drop target registered on WhaleView (children cleared)")
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         let ok = accepts(sender)
+        dragTrace("entered ok=\(ok) types=\(sender.draggingPasteboard.types?.map(\.rawValue) ?? [])")
         if ok { showDropHint(true) }
         return ok ? .copy : []
     }
@@ -41,10 +62,13 @@ extension WhaleView {
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         showDropHint(false)
+        dragTrace("perform drop")
         guard let url = saveImage(from: sender) else {
+            dragTrace("drop rejected: 读不出图片")
             NSSound.beep()
             return false
         }
+        dragTrace("saved \(url.path)")
         onImageDropped?(url)
         return true
     }
@@ -65,6 +89,7 @@ extension WhaleView {
            let first = urls.first {
             return Self.imageExtensions.contains(first.pathExtension.lowercased())
         }
+        if pb.data(forType: .png) != nil || pb.data(forType: .tiff) != nil { return true }
         return NSImage(pasteboard: pb) != nil
     }
 
@@ -83,15 +108,27 @@ extension WhaleView {
         var image: NSImage?
         var displayName = "drop"
 
+        var source = "none"
         if let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL],
            let first = urls.first,
            Self.imageExtensions.contains(first.pathExtension.lowercased()) {
             image = NSImage(contentsOf: first)
             displayName = first.deletingPathExtension().lastPathComponent
+            source = "file:\(first.pathExtension)"
+        }
+        if image == nil, let data = pb.data(forType: .png) {
+            image = NSImage(data: data)
+            source = "png-data"
+        }
+        if image == nil, let data = pb.data(forType: .tiff) {
+            image = NSImage(data: data)
+            source = "tiff-data"
         }
         if image == nil {
             image = NSImage(pasteboard: pb)
+            source = "pasteboard"
         }
+        dragTrace("saveImage source=\(source) image=\(image != nil)")
         guard let src = image, let normalized = DroppedImageStore.pngData(src) else { return nil }
         return DroppedImageStore.savePNG(normalized, preferredName: displayName)
     }

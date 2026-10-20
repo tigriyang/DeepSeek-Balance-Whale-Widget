@@ -221,7 +221,7 @@ final class NotifyBridge: NSObject, UNUserNotificationCenterDelegate {
     ///
     /// 首条用「你好」—— 它不是给用户看的，作用只是让 DSH 开口。
     /// 等 DSH 回完，正常的通知链路就接上了，用户可以直接在通知里回。
-    /// 起一次新对话；`imagePath` 非空时把这张图也带上（floatstudy）。
+    /// 起一次新对话；`imagePath` 非空时把这张图也带上（whale-study）。
     func beginNewSession(text: String = "你好", imagePath: String? = nil) {
         writeReply(text: text, sessionId: "", newSession: true, imagePath: imagePath)
     }

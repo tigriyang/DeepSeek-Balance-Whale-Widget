@@ -10,7 +10,7 @@
  *   reply    ← ~/.dsh/.whalefloat-reply.json     （通知里的回复 / 拖图解题）
  *   轮询到后调 agent.followup() 注入对话。
  *   box.image 存在时，图会以 DSH 附件的形式附在同一条用户消息上
- *   （floatstudy：拖一张截图进来，开新会话解题）。
+ *   （whale-study：拖一张截图进来，开新会话解题）。
  *
  * 原先拆成三个插件，后来合并 —— 三者订阅的是同一条 session/event 流。
  * 所有异常都被吞掉：中介出问题不该影响宿主。

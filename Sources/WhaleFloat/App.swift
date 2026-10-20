@@ -1025,7 +1025,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         snackScheduledAt = nil
     }
 
-    // MARK: - 拖图解题（0.2.0 floatstudy）
+    // MARK: - 拖图解题（0.2.0 whale-study）
 
     /// 拖图之后的开场白。
     ///
