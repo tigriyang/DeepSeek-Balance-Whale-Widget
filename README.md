@@ -342,8 +342,9 @@ WhaleFloat.app                Swift 6 + AppKit 原生程序
 这是做这次移植的前提。用 fork 而不是另建仓库，是为了让这份继承
 关系在 GitHub 上始终可见 —— **语言变了，源头没变**。
 
-但**不跟踪上游提交**：上游是 JS 网页插件，本仓库是 macOS 独立应用；
-不 merge、不 rebase、不向上游发 PR，只按需移植界面与交互修复。
+**暂时保持依附，不独立成另一个项目**：上游负责网页插件，这边负责 macOS 应用；
+不整仓 merge/rebase，只按需移植界面与交互修复。能在上游插件侧解决的改动
+（界面 bug、交互节奏）回上游；只有 Swift 原生组件留在这边，避免重复实现。
 规则写在 [docs/upstream-policy.md](docs/upstream-policy.md)，
 `tools/upstream-review.sh` 用来定期列出上游相关提交。
 

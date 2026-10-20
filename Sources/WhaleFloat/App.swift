@@ -1029,9 +1029,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     ///
     /// 为什么需要：启动器（dsh-launcher）会打开浏览器页面，DSH 框架也会常驻；
     /// 它们都不属于本程序，退出浮窗时不会被带走 —— 于是出现「后台一直在冒网页」
-    /// 这类残留。费扬要求有个「退出即清场」的入口。
+    /// 这类残留。产品侧要求有个「退出即清场」的入口。
     ///
-    /// 不做二次确认（费扬要求「一定要简单」）：菜单项本身已经写明「并关闭 DSH」，
+    /// 不做二次确认（产品侧要求「一定要简单」）：菜单项本身已经写明「并关闭 DSH」，
     /// 点它就是要清场；再弹一个框反而是多一道手续。怕误点的话，「退出浮窗」就在它下面。
     @objc func quitEverything() {
         let summary = ProcessManager.cleanupAll()

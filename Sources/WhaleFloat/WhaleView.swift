@@ -253,7 +253,7 @@ final class WhaleView: NSView {
 
         // 徽章用固定尺寸的容器，避免 Auto Layout 在横向栈里给它算出 0 宽。
         badgeLabel.frame = NSRect(x: 0, y: 0, width: 22, height: 15)
-        // 「谷/峰」徽章 + 时间放同一行（费扬要求），省一行高度
+        // 「谷/峰」徽章 + 时间放同一行（产品侧要求），省一行高度
         countdownLabel.isHidden = true
         let valleyRow = NSStackView(views: [badgeLabel, lastTurnLabel])
         valleyRow.orientation = .horizontal
@@ -822,7 +822,7 @@ final class WhaleView: NSView {
 
     /// 更新峰谷标记。
     ///
-    /// 只显示一个字「峰」或「谷」—— 费扬定的：倒计时太占地方，
+    /// 只显示一个字「峰」或「谷」—— 产品侧定的：倒计时太占地方，
     /// 余额泡里给个状态字就够。peak 为 nil 时整行隐藏。
     func setValleyBadge(peak: Bool?) {
         guard let isPeak = peak else {
@@ -838,7 +838,7 @@ final class WhaleView: NSView {
 
     // MARK: - 按压反馈
 
-    /// 点击分两段（费扬定）：
+    /// 点击分两段（实际使用中定的）：
     ///   · 气泡**没显示**时 → 第一次点击出气泡（余额 / 已用 / 时间）
     ///   · 气泡**已在显示**时 → 这次点击做按压形变，作为交互反馈的补充
     /// 双击仍然是「立刻收起」。

@@ -80,7 +80,7 @@ final class BubblePresenter {
         hideTimer?.invalidate()
         hideTimer = nil
 
-        // 等待泡**豁免自动收回**（费扬要求）：它该持久显示，直到 DSH 的等待状态
+        // 等待泡**豁免自动收回**（产品侧要求）：它该持久显示，直到 DSH 的等待状态
         // 真正被解除（用户回答了 / 授权了）。
         // 注意不能靠 autoHideSeconds 的默认值来兜 —— 用户设的秒数优先级更高，
         // 会把这一豁免盖掉，于是泡在用户还在思考时就消失了。
