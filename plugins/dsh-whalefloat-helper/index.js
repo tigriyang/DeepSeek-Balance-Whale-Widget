@@ -78,12 +78,28 @@ const PRICE = {
 	pro: { hit: 0.06, miss: 3.0, out: 12.0 },
 };
 
+/// 本地推理：按算力算钱，不按官方 token 价。命中就不计价。
+const LOCAL_MODEL = /(ollama|lmstudio|lm-studio|llama\.cpp|vllm|local)/;
+
+/**
+ * 模型 → 价位；未知返回 null。
+ *
+ * 以前是「不是 pro 就当 flash」，本地模型、第三方 API 全被套上 deepseek 的价格，
+ * 账本里因此出现假数字（上游 #271）。现在只认 deepseek 自家两档：
+ * pro / reasoner 走 pro，其余 deepseek 走 flash；别的模型一律 null，
+ * 写进账本就是 cost:null，界面上显示「未计价」。
+ */
 function priceFor(model) {
-	return /pro/i.test(String(model)) ? PRICE.pro : PRICE.flash;
+	const m = String(model ?? "").toLowerCase();
+	if (!m) return null;
+	if (LOCAL_MODEL.test(m)) return null;
+	if (!m.includes("deepseek")) return null;
+	return m.includes("pro") || m.includes("reasoner") ? PRICE.pro : PRICE.flash;
 }
 
 function costOf(usage, model, at) {
 	const p = priceFor(model);
+	if (!p) return null;
 	const input = Number(usage.inputTokens) || 0;
 	const cacheRead = Number(usage.cacheReadTokens) || 0;
 	const output = Number(usage.outputTokens) || 0;
@@ -197,6 +213,7 @@ const usage = {
 			ts: at,
 			day: dayKey(new Date(at)),
 			model,
+			// 未知模型写 null：读取方据此显示「未计价」，不显示 0 元
 			cost: costOf(u, model, new Date(at)),
 			tokens: input + cacheRead + output,
 		});

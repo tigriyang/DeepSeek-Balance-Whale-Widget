@@ -7,6 +7,7 @@ import Foundation
 /// 它监听 DSH 的 usage 事件，把每轮写成一条：
 ///   {"ts": ..., "day": "2026-10-15", "model": "deepseek-flash",
 ///    "cost": 0.26533508, "tokens": 10442304}
+/// 未收录价格的模型（本地 Ollama、第三方 API）写 "cost": null。
 ///
 /// 为什么读这个文件而不是自己解析会话：
 ///   DSH 本来就知道消耗，会话文件是 zstd 多帧压缩、系统没有独立 libzstd，
@@ -18,7 +19,7 @@ enum TurnLedger {
         let ts: Double          // 毫秒时间戳
         let day: String
         let model: String
-        let cost: Double        // 人民币元
+        let cost: Double?       // 人民币元；null 表示该模型没有价格口径（未计价）
         let tokens: Int
 
         var date: Date { Date(timeIntervalSince1970: ts / 1000) }

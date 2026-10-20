@@ -604,9 +604,13 @@ final class WhaleView: NSView {
         case .turn:
             // 本轮消耗视图：标题「本轮消耗」+ 金额大号 + token/时间小字
             titleLabel.stringValue = "本轮消耗"
-            if let t = turn {
-                amountLabel.stringValue = String(format: "¥%.4f", t.cost)
+            if let t = turn, let cost = t.cost {
+                amountLabel.stringValue = String(format: "¥%.4f", cost)
                 usedLabel.stringValue = "\(Self.formatTokens(t.tokens)) tokens"
+            } else if let t = turn {
+                // 未知模型不编造价格：给 token 数，金额写成「未计价」
+                amountLabel.stringValue = "未计价"
+                usedLabel.stringValue = "\(Self.formatTokens(t.tokens)) tokens · \(Self.shortModel(t.model))"
             } else {
                 amountLabel.stringValue = "—"
                 usedLabel.stringValue = " "
@@ -672,6 +676,12 @@ final class WhaleView: NSView {
         let f = DateFormatter()
         f.dateFormat = "HH:mm:ss"
         lastTurnLabel.stringValue = f.string(from: date)
+    }
+
+    /// 模型名简写：去掉 provider 前缀，过长截断 —— 底行只有一行小字的位置。
+    static func shortModel(_ name: String) -> String {
+        let base = name.split(separator: "/").last.map(String.init) ?? name
+        return base.count <= 14 ? base : String(base.prefix(13)) + "…"
     }
 
     /// token 数简写：1.2M / 4.3K。

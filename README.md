@@ -146,6 +146,10 @@ open -a WhaleFloat --args --analysis   # 启动并直接打开用量窗口
 
 气泡有两种：**余额**（带峰谷标记）和**每轮消耗**（带 token 数与时刻）。
 
+金额按 deepseek 官方价目算：pro / reasoner 一档，flash 一档，高峰时段翻倍。
+**模型没有价格口径时（本地 Ollama、LM Studio、第三方 API），金额显示「未计价」**，
+只给 token 数 —— 宁可空着，也不套用 deepseek 的价目编个数字出来。
+
 ![消耗气泡](docs/images/bubble-turn.png)
 
 角色素材需要自备（原因见「素材」一节）。
