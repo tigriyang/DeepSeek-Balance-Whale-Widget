@@ -35,15 +35,13 @@ enum PeakValley {
     static func isPeak(at date: Date = Date()) -> Bool {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(identifier: "Asia/Shanghai") ?? .current
-        // 今天这一刻优先问系统日历 —— 用户订阅的节假日日历是权威源，
-        // 且不需要我们去维护年份。查不到（未授权/未订阅）则返回 nil，往下走。
-        if cal.isDateInToday(date), let fromSystem = SystemHoliday.isTodayHoliday() {
-            if fromSystem { return false }   // 法定假日 → 全天谷价
-            // 不是假日时不能就此断定「按工作日」——今天可能是调休的周末，
-            // 那要上班。交给下面的周末判断，它读得到 JSON 里的补班数据。
+        // 今天优先问系统日历 —— 用户订阅的「中国大陆节假日」是权威源。
+        // 但**不主动申请授权**：没授权就安静地走下面的内置数据，
+        // 避免每次重新签名都弹一次日历框。
+        if cal.isDateInToday(date), SystemHoliday.isAuthorized,
+           let fromSystem = SystemHoliday.isTodayHoliday() {
+            if fromSystem { return false }
         }
-
-        // 其余日期（含未来，倒计时要用）：走本地数据。
         // 法定假日全谷价；补班的周末在这里返回 false，于是按工作日继续判时段。
         // 数据缺失时退化为「周末算假日」。
         if HolidayCalendar.isOffDay(date) { return false }

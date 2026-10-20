@@ -7,7 +7,11 @@
 #   拖进去即完成安装（macOS 的标准安装方式）。
 #
 # 拖进 /Applications 后首次运行时，程序会自己装好 launchd 自启，
-# 并引导安装两个 DSH 插件 —— 不需要再跑任何脚本。
+# 并静默安装配套插件 —— 不需要再跑任何脚本。
+#
+# 这个脚本**不覆盖 /Applications 里的开发版**：发布包在临时目录里组装、
+# ad-hoc 签名，再打进 DMG。开发机上的应用保持「WhaleFloat Dev」自签名，
+# 反复打包不会让 TCC（日历等）权限失效。
 # ------------------------------------------------------------------
 set -euo pipefail
 
@@ -26,32 +30,31 @@ VERSION="$(grep -rhoE 'static let version = "[^"]+"' "$HERE/Sources/WhaleFloat/"
 
 OUT="$DIST/${APP_NAME}-${VERSION}.dmg"
 
-echo "▸ 先构建 app…"
-# 打发布包时用 ad-hoc 签名（见 build-app.sh 里的说明）
-RELEASE=1 bash "$HERE/build-app.sh"
+echo "▸ 构建发布包（不覆盖本机 /Applications）…"
+BUILD_STAGE="$(mktemp -d)"
+DMG_STAGE="$(mktemp -d)"
+trap 'rm -rf "$BUILD_STAGE" "$DMG_STAGE"' EXIT
+STAGE_DIR="$BUILD_STAGE" RELEASE=1 bash "$HERE/build-app.sh"
 
-APP="/Applications/${APP_NAME}.app"
+APP="$BUILD_STAGE/${APP_NAME}.app"
 [ -d "$APP" ] || { echo "✗ 找不到 $APP"; exit 1; }
 
 echo "▸ 准备 DMG 内容…"
 mkdir -p "$DIST"
 rm -f "$OUT"
 
-STAGE="$(mktemp -d)"
-trap 'rm -rf "$STAGE"' EXIT
-
-cp -R "$APP" "$STAGE/"
+cp -R "$APP" "$DMG_STAGE/"
 # 指向 /Applications 的快捷方式 —— 用户拖进去即可
-ln -s /Applications "$STAGE/应用程序"
+ln -s /Applications "$DMG_STAGE/应用程序"
 # 素材来源与许可 —— 放在安装盘根部，不打开应用也能看到
 if [ -f "$HERE/NOTICE-ASSETS.md" ]; then
-  cp "$HERE/NOTICE-ASSETS.md" "$STAGE/素材来源与许可.md"
+  cp "$HERE/NOTICE-ASSETS.md" "$DMG_STAGE/素材来源与许可.md"
 fi
 
 echo "▸ 生成 DMG…"
 hdiutil create \
   -volname "$VOL_NAME" \
-  -srcfolder "$STAGE" \
+  -srcfolder "$DMG_STAGE" \
   -ov -format UDZO \
   "$OUT" > /dev/null
 

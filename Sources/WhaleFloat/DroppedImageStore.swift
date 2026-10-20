@@ -67,7 +67,8 @@ enum DroppedImageStore {
     private static func fileStamp() -> String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyyMMdd-HHmmss"
+        // 带毫秒：同一秒内连拖两张不会互相覆盖（之前只用秒，第二张会盖掉第一张）
+        f.dateFormat = "yyyyMMdd-HHmmss-SSS"
         return f.string(from: Date())
     }
 

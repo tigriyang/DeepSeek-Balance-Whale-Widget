@@ -38,6 +38,10 @@ final class FloatWindow: NSPanel {
         whaleView.autoresizingMask = [.width, .height]
         contentView = whaleView
 
+        // 无边框窗口有时只把拖拽送给窗口级目的地，不经过 contentView。
+        // 两处都注册、都转发到同一套处理，哪条路先到都能接住。
+        registerForDraggedTypes(WhaleView.dropTypes)
+
         moveToDefaultPosition()
         NotificationCenter.default.addObserver(
             self,
@@ -193,6 +197,26 @@ final class FloatWindow: NSPanel {
 
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+
+    // MARK: - 窗口级拖拽（转发给 WhaleView）
+
+    @objc func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        dragTrace("window draggingEntered")
+        return whaleView.draggingEntered(sender)
+    }
+
+    @objc func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        return whaleView.draggingUpdated(sender)
+    }
+
+    @objc func draggingExited(_ sender: NSDraggingInfo?) {
+        whaleView.draggingExited(sender)
+    }
+
+    @objc func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        dragTrace("window performDragOperation")
+        return whaleView.performDragOperation(sender)
+    }
 }
 
 /// 用户设置。存成一个 JSON 落在 ~/.dsh/whalefloat.json。
@@ -253,6 +277,12 @@ struct Settings: Codable {
     var animationMeal: String = "hungry"
     /// 静置偷吃时播放的动画名。
     var animationSnack: String = "meal"
+
+    // ── 版本 ────────────────────────────────────────────
+    /// 上一次运行时的版本。用来区分「升级」与「首次运行」。
+    var lastVersion: String = ""
+    /// 上一次运行的签名身份指纹。身份变了，旧的 TCC 条目就是脏的。
+    var lastSigningToken: String = ""
 
     // ── 陪伴（0.2.0「floatcompany」）──────────────────────
     /// 忙久了说一句加油。
@@ -323,6 +353,8 @@ struct Settings: Codable {
         animationOn = get(.animationOn, true)
         animationMeal = get(.animationMeal, "hungry")
         animationSnack = get(.animationSnack, "meal")
+        lastVersion = get(.lastVersion, "")
+        lastSigningToken = get(.lastSigningToken, "")
         companyOn = get(.companyOn, true)
     }
 

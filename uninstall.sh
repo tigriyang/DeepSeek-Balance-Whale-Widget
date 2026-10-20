@@ -7,7 +7,7 @@
 #   2. 开机自启              ~/Library/LaunchAgents/ai.dsh.whalefloat.plist
 #   3. DSH 插件（引用 + 源码）dsh-whalefloat-helper
 #      （外加合并前的三个旧名，给从旧版升级上来的机器做历史清理）
-#   4. 设置与数据            设置、导入的角色、账本、状态文件
+#   4. 设置与数据            设置、导入的角色、自定义动画、拖图缓存、账本、状态文件
 #   5. 系统级缓存与偏好      ~/Library 下按 bundle id 匹配的各目录
 #   6. 运行期日志            /tmp/whalefloat*.log
 #   7. LaunchServices 注册   （让 Finder / 聚焦不再记得这个 app）
@@ -68,6 +68,9 @@ if [ "$KEEP" = "1" ]; then
 else
   removed "$H/.dsh/whalefloat.json" "设置"
   removed "$H/.dsh/whalefloat-assets" "导入的角色"
+  # 0.2.0 新增的两处用户内容：不卸载的话，重装会带着旧动画和旧拖图。
+  removed "$H/.dsh/whalefloat-animations" "自定义动画"
+  removed "$H/.dsh/whalefloat-drops" "拖图缓存"
 fi
 for f in .whalefloat-notify.json .whalefloat-reply.json .whalefloat-wait.json .whalefloat-usage.json; do
   removed "$H/.dsh/$f" "$f"
@@ -84,6 +87,12 @@ for d in "Library/Preferences/${BUNDLE_ID}.plist" \
   removed "$H/$d" "$(basename "$d")"
 done
 defaults delete "$BUNDLE_ID" 2>/dev/null
+
+say "▸ 清理系统授权条目…"
+# 屏幕录制/日历等 TCC 条目按签名身份记；留着旧条目会出现
+# 「系统设置显示已授权、实际不生效」。卸载时一并清掉。
+/usr/bin/tccutil reset All "$BUNDLE_ID" >/dev/null 2>&1 \
+  && say "  ✓ 已清除 TCC 授权条目（屏幕录制/日历等）"
 
 say "▸ 清理日志…"
 rm -f /tmp/whalefloat*.log 2>/dev/null && say "  ✓ 已删除 /tmp/whalefloat*.log"

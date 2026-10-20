@@ -32,6 +32,29 @@ enum WhaleFloatApp {
             printAnimationsReport()
             return
         }
+        if args.contains("--frames-report") {
+            _ = NSApplication.shared
+            printFramesReport()
+            return
+        }
+        if args.contains("--tcc-probe") {
+            _ = NSApplication.shared
+            let ok = AppDelegate.probeScreenCapture()
+            print("屏幕录制探测后:", ok ? "已授权" : "未授权")
+            exit(ok ? 0 : 1)
+        }
+        if args.contains("--tcc-report") {
+            print("屏幕录制:", CGPreflightScreenCaptureAccess() ? "已授权" : "未授权")
+            print("系统日历:", SystemHoliday.isAuthorized ? "已授权（不主动申请）" : "未授权，走内置+联网数据")
+            let sys = SystemHoliday.isTodayHoliday().map { $0 ? "假日" : "非假日" } ?? "查不到"
+            print("今日系统日历:", sys)
+            print("今日内置数据:", HolidayCalendar.isOffDay(Date()) ? "假日" : "非假日")
+            return
+        }
+        if let path = value(of: "--image-check", in: args) {
+            imageCheck(path)
+            return
+        }
         if args.contains("--menu-report") {
             _ = NSApplication.shared
             printMenuReport()
@@ -58,6 +81,38 @@ enum WhaleFloatApp {
         delegate.dropImageOnLaunch = value(of: "--drop", in: args)
         delegate.dropCopyOnLaunch = value(of: "--drop-copy", in: args)
         app.run()
+    }
+
+    /// 走一遍拖图的转码/落盘链路，不建会话。验证 jpg / png / heic 等格式。
+    @MainActor
+    private static func imageCheck(_ path: String) {
+        guard let image = NSImage(contentsOfFile: path) else {
+            print("✗ 读不出图片：\(path)")
+            exit(1)
+        }
+        guard let url = DroppedImageStore.save(image, preferredName: "格式自测") else {
+            print("✗ 转码/落盘失败：\(path)")
+            exit(1)
+        }
+        let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
+        print("✓ \(path) → \(url.path)（\(size ?? 0) 字节）")
+    }
+
+    /// 打印窗口与各视图的 frame，排查拖拽命中区错位。
+    @MainActor
+    private static func printFramesReport() {
+        let win = FloatWindow(size: 152)
+        win.whaleView.enableDropTarget()
+        win.whaleView.layoutSubtreeIfNeeded()
+        func dump(_ v: NSView, _ depth: Int) {
+            print(String(repeating: "  ", count: depth),
+                  type(of: v), "frame=\(v.frame) bounds=\(v.bounds)",
+                  "hidden=\(v.isHidden) alpha=\(v.alphaValue)")
+            for sub in v.subviews { dump(sub, depth + 1) }
+        }
+        print("window", win.frame, "content", win.contentView?.frame ?? .zero,
+              "hasShadow=\(win.hasShadow) alpha=\(win.alphaValue) opaque=\(win.isOpaque)")
+        dump(win.whaleView, 0)
     }
 
     /// 打印右键菜单结构（含子菜单与勾选），供命令行自测。

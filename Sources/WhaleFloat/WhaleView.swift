@@ -24,6 +24,23 @@ enum BubbleStyle {
     static let badgeSize: CGFloat = 9.5
 }
 
+/// 角色底图。用普通 NSView 手绘，而不是 NSImageView ——
+/// NSImageView 会在设图/布局后于内部注册拖拽类型，
+/// 拖到角色区域时它成了「最深的已注册视图」，把拖图截走。
+final class RoleImageView: NSView {
+    var image: NSImage? { didSet { needsDisplay = true } }
+
+    override var isOpaque: Bool { false }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard let image else { return }
+        image.draw(in: bounds, from: .zero, operation: .sourceOver, fraction: 1,
+                   respectFlipped: false,
+                   hints: [.interpolation: NSImageInterpolation.high.rawValue])
+    }
+}
+
 /// 浮窗里的鲸鱼视图：底图 + 气泡文字层 + 交互。
 final class WhaleView: NSView {
     /// 角色素材。
@@ -64,13 +81,15 @@ final class WhaleView: NSView {
     /// 气泡内可用高度。
     static var bubbleInnerHeight: CGFloat { BubbleShapeView.ellipseRadius.height * 2 * 0.84 }
 
-    private let imageView = NSImageView()
+    private let imageView = RoleImageView()
     /// 内置的纯角色素材文件名（无气泡）。
     nonisolated static let defaultRoleFile = "role-clean.png"
     /// 气泡形状层（独立绘制，不属于角色图）。
     private let bubbleShape = BubbleShapeView()
     /// 有图片被拖到身上时回调，参数是落盘后的文件路径。
     var onImageDropped: ((URL) -> Void)?
+    /// 拖拽悬停变化（true = 进入，false = 离开/松手）。
+    var onDropHover: ((Bool) -> Void)?
 
     /// 动画行：放在气泡内部的栈里，由 NSStackView 排版 ——
     /// 不再另起一层做绝对定位，也就没有「换张立绘就歪」的问题。
@@ -124,12 +143,22 @@ final class WhaleView: NSView {
 
     // MARK: - 构建
 
+    /// 所有鼠标/拖拽命中都归 WhaleView。
+    ///
+    /// 子视图（角色图、标签、内部 WebView）只做展示。AppKit 的拖拽目的地
+    /// 是「光标下最深的、注册过该类型的视图」——NSImageView 等内部实现
+    /// 会在设图后自己注册，把角色区域截走。这里统一返回自己，
+    /// 注册与处理都在一处，触发区才和整只鲸鱼对齐。
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let local = superview.map { convert(point, from: $0) } ?? point
+        return bounds.contains(local) ? self : nil
+    }
+
     /// 角色层：只放**纯角色**（不含气泡）。
     ///
     /// 这是照原作的分层做法：原作角色图本身就是纯角色，气泡由 SVG 单独画。
     /// 早先从「气泡+角色」的合成图里抠气泡，因为描边与呆毛像素紧邻而无法完美分离。
     private func buildImage() {
-        imageView.imageScaling = .scaleAxesIndependently
         reloadImages(characterName: Self.defaultCharacterName)
         content.addSubview(imageView)
         layoutImageView()
@@ -167,6 +196,8 @@ final class WhaleView: NSView {
         imageView.image = AssetPaths.load("\(name).png")
             // 兜底：素材缺失时回到内置默认角色，避免整只鲸鱼消失
             ?? AssetPaths.load(Self.defaultRoleFile)
+        // 设图之后 NSImageView 会在内部注册拖拽类型，必须再清一遍
+        refreshDropTarget()
     }
 
     /// 气泡文字：四行，垂直紧凑排布，整块在气泡内居中。
@@ -540,6 +571,12 @@ final class WhaleView: NSView {
             usedLabel.isHidden = true
             badgeRow.isHidden = true
             lastTurnLabel.isHidden = true
+        case .dropHint:
+            titleLabel.isHidden = false
+            amountLabel.isHidden = true
+            usedLabel.isHidden = true
+            badgeRow.isHidden = true
+            lastTurnLabel.isHidden = true
         case .study:
             // 拖图回执：一句话
             titleLabel.isHidden = false
@@ -732,6 +769,8 @@ final class WhaleView: NSView {
         animationHeight?.constant = h
         animationView.isHidden = false
         animationView.play(asset)
+        // 内部 WebView 可能自己注册拖拽类型，重新把目的地收回到 WhaleView
+        refreshDropTarget()
         needsLayout = true
         return true
     }

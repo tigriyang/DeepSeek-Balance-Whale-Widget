@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import CoreGraphics
 
 /// 应用委托：持有浮窗、菜单栏项、定时刷新。
 @MainActor
@@ -123,11 +124,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.handleDroppedImage(saved)
             }
         }
-
-        // 日历访问：用于判断「今天是不是法定假日」。
-        // 不是敏感权限（只读节假日标记，不读用户自己的日程），
-        // 首次会弹一次系统授权框，拒绝也不影响其它功能。
-        SystemHoliday.requestAccessIfNeeded()
 
         // 节假日数据：内置快照已随包，这里静默检查一次更新
         // （今年与明年；明年通常在 11 月前后才公布，拉不到就跳过）。
@@ -272,6 +268,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         view.onImageDropped = { [weak self] url in
             self?.handleDroppedImage(url)
         }
+        view.onDropHover = { [weak self] inside in
+            guard let self else { return }
+            if inside {
+                // 拖拽期间提示优先：别让轮末消耗泡之类的把提示挡掉
+                guard self.presenter.kind != .dropHint else { return }
+                self.presenter.show(.dropHint)
+                self.floatWindow?.whaleView.setSimpleText("松手，我看图")
+            } else if self.presenter.kind == .dropHint {
+                self.presenter.hideNow()
+            }
+        }
 
         floatWindow = win
         presenter = BubblePresenter(view: view)
@@ -333,6 +340,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // 先扫一遍动画目录：菜单里要能立刻看到内置与自定义项
         AnimationCatalog.shared.reload()
         startCompanyWatcherIfNeeded()
+        noteIdentityChangeIfNeeded()
+        noteVersionChangeIfNeeded()
+    }
+
+    // MARK: - 升级
+
+    /// 签名身份变了就清掉旧的屏幕录制 TCC 条目。
+    ///
+    /// 不清的话，系统设置里的开关还亮着（旧身份留下的），新进程却拿不到权限，
+    /// 表现为「显示已授权、实际不给 DSH」。只在身份变化且当前确实无权限时清，
+    /// 有权限就不动 —— 稳定的证书重签不会触发这里。
+    private func noteIdentityChangeIfNeeded() {
+        let token = AppIdentity.token()
+        let previous = settings.lastSigningToken
+        guard token != previous else { return }
+        settings.lastSigningToken = token
+        settings.save()
+        NSLog("WhaleFloat: 签名身份 \(previous.isEmpty ? "首次" : previous) → \(token)")
+        guard !previous.isEmpty else { return }
+
+        // 身份变了，旧身份下的所有 TCC 条目都不能再用：屏幕录制、桌面、
+        // 文稿/下载、辅助功能、自动化、系统设置……一律清掉，避免
+        // 「系统设置里亮着、新进程拿不到」的脏权限。稳定的证书重签不会走到这里。
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        p.arguments = ["reset", "All", "ai.dsh.whalefloat"]
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        try? p.run()
+        p.waitUntilExit()
+        NSLog("WhaleFloat: 签名身份变化，已清理旧 TCC 条目（屏幕录制/文件目录/辅助功能等）")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self, self.presenter.kind == .hidden else { return }
+            self.presenter.show(.company)
+            self.floatWindow?.whaleView.setCompanyCaption("系统权限需重新授权")
+        }
+    }
+
+    /// 记下这次运行的版本；不是首次运行就冒一句「更新到 x」。
+    ///
+    /// 升级路径是「下载新 dmg，覆盖 /Applications 里的应用」：
+    /// 设置、素材、账本、动画、拖图缓存都原样保留，配套插件由
+    /// PluginInstaller 比对内容后自动更新。这里只负责让用户知道
+    /// 「新版本已经跑起来了」，否则覆盖安装没有任何可见回执。
+    private func noteVersionChangeIfNeeded() {
+        let current = AppInfo.version
+        let previous = settings.lastVersion
+        guard previous != current else { return }
+        settings.lastVersion = current
+        settings.save()
+        NSLog("WhaleFloat: 版本 \(previous.isEmpty ? "首次运行" : previous) → \(current)")
+        guard !previous.isEmpty else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self, self.presenter.kind == .hidden else { return }
+            self.presenter.show(.company)
+            self.floatWindow?.whaleView.setCompanyCaption("更新到 \(current)")
+        }
     }
 
     // MARK: - 陪伴（0.2.0 floatcompany）
@@ -846,12 +910,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         alert.informativeText = """
             会清掉这些东西，跟仓库里 uninstall.sh 的行为一致：
               · 开机自启配置
-              · DSH 里的配套插件（含 profile 里那份副本）
+              · DSH 里的配套插件（引用、源码、profile 副本）
               · 应用本体
-              · 设置、导入的角色、账本与状态文件
+              · 设置、导入的角色、拖图缓存、自定义动画
+              · 账本与状态文件
               · 缓存与日志
 
-            想保留设置（换机重装用），改用 uninstall.sh --keep-data。
+            想保留设置与素材（换机重装用），改用 uninstall.sh --keep-data。
             """
         alert.addButton(withTitle: "全部清掉")
         alert.addButton(withTitle: "取消")
@@ -880,6 +945,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for path in [
             ".dsh/whalefloat.json",
             ".dsh/whalefloat-assets",
+            ".dsh/whalefloat-drops",
+            ".dsh/whalefloat-animations",
             ".dsh/.whalefloat-usage.json",
             ".dsh/.whalefloat-notify.json",
             ".dsh/.whalefloat-wait.json",
@@ -895,12 +962,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             "Library/Saved Application State/ai.dsh.whalefloat.savedState",
             "Library/HTTPStorages/ai.dsh.whalefloat",
             "Library/WebKit/ai.dsh.whalefloat",
+            "Library/Application Support/ai.dsh.whalefloat",
+            "Library/Containers/ai.dsh.whalefloat",
         ] {
             try? fm.removeItem(at: home.appendingPathComponent(path))
         }
         UserDefaults.standard.removePersistentDomain(forName: "ai.dsh.whalefloat")
+        for f in ["whalefloat-drag.log", "whalefloat-helper.log", "whalefloat-notify.log"] {
+            try? fm.removeItem(at: URL(fileURLWithPath: "/tmp/\(f)"))
+        }
 
-        // ⑤ 本体进废纸篓（最后一步：前面还要用 Bundle.main）
+        // ⑤ 系统授权条目：不清的话，系统设置里会留着旧条目，
+        //    重装后显示「已授权」但实际不生效 —— 正是「脏权限」。
+        let tcc = Process()
+        tcc.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        tcc.arguments = ["reset", "All", "ai.dsh.whalefloat"]
+        tcc.standardOutput = FileHandle.nullDevice
+        tcc.standardError = FileHandle.nullDevice
+        try? tcc.run()
+        tcc.waitUntilExit()
+
+        // ⑥ 本体进废纸篓（最后一步：前面还要用 Bundle.main）
         let bundle = Bundle.main.bundleURL
         NSWorkspace.shared.recycle([bundle]) { _, _ in
             DispatchQueue.main.async { NSApp.terminate(nil) }
@@ -1032,10 +1114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 「先思路、后答案」是刻意的：直接把答案倒出来对学习没帮助，
     /// 但真做不出来也得有个结果，所以两样都给。
     /// 图里信息不全时让它明说缺什么，而不是硬猜。
-    static let studyPrompt = """
-    我拖来一张截图，多半是道题。先看清题干、已知条件、要问什么，再动手解。
-    前几步只说思路，最后给答案；图里信息不全就直接讲缺什么，别猜。
-    """
+    static let studyPrompt = "说说你的看法"
 
     /// 收到一张拖进来的图。
     ///
@@ -1135,6 +1214,75 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         a.runModal()
     }
 
+    /// 菜单「屏幕录制权限…」。
+    ///
+    /// WhaleFloat 是 DSH 的壳：DSH 的截图/OCR 由它拉起，TCC 会把权限
+    /// 记在这个壳头上。重新签名后旧条目会变成「显示已打开、实际不生效」，
+    /// 这里给出申请、重置、跳系统设置三条路。
+    @objc func screenCapturePermission() {
+        let granted = CGPreflightScreenCaptureAccess()
+        let a = NSAlert()
+        a.messageText = "屏幕录制权限"
+        a.informativeText = granted
+            ? "当前已授权。DSH 的截图/OCR 会借用这个外壳的权限。\n如果系统设置里显示已打开、实际仍不生效，用「重置并重新申请」清掉旧签名条目。"
+            : "当前未授权。DSH 的截图/OCR 需要这个外壳的屏幕录制权限。\n\n如果没有弹出系统授权框：打开的设置页里点左下角 +，选择 /Applications/WhaleFloat.app，再打开开关；完成后退出并重开 WhaleFloat。\n\n系统设置里显示已打开却仍不生效时，先「重置并重新申请」清掉旧签名条目。"
+        a.addButton(withTitle: granted ? "打开系统设置" : "申请权限")
+        a.addButton(withTitle: "重置并重新申请")
+        a.addButton(withTitle: "取消")
+        switch a.runModal() {
+        case .alertFirstButtonReturn:
+            if !granted {
+                _ = CGRequestScreenCaptureAccess()
+                _ = Self.probeScreenCapture()
+            }
+            openScreenCaptureSettings()
+        case .alertSecondButtonReturn:
+            resetScreenCapturePermission()
+        default:
+            break
+        }
+    }
+
+    /// 真正去截一张，触发 TCC 登记。
+    ///
+    /// 只调 CGRequestScreenCaptureAccess() 在某些 macOS 版本上不会弹框；
+    /// 让本壳跑一次 screencapture，系统才会把「谁在申请屏幕」记下来。
+    static func probeScreenCapture() -> Bool {
+        NSApp.activate(ignoringOtherApps: true)
+        let tmp = "/tmp/whalefloat-tcc-probe.png"
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        p.arguments = ["-x", tmp]
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        try? p.run()
+        p.waitUntilExit()
+        try? FileManager.default.removeItem(atPath: tmp)
+        let ok = CGPreflightScreenCaptureAccess()
+        NSLog("WhaleFloat: 屏幕探测 exit=\(p.terminationStatus) preflight=\(ok)")
+        return ok
+    }
+
+    private func openScreenCaptureSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    /// 清掉这个 bundle 的旧屏幕录制条目，再让壳重新申请一次。
+    private func resetScreenCapturePermission() {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        p.arguments = ["reset", "ScreenCapture", "ai.dsh.whalefloat"]
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        try? p.run()
+        p.waitUntilExit()
+        _ = CGRequestScreenCaptureAccess()
+        _ = Self.probeScreenCapture()
+        openScreenCaptureSettings()
+    }
+
     /// 菜单「素材来源与许可…」：优先打开包内那份，离线也能看。
     @objc func openAssetNotice() {
         if let url = Bundle.main.url(forResource: "NOTICE-assets", withExtension: "md") {
@@ -1225,6 +1373,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
            presenter.kind != .snack,
            presenter.kind != .animation,
            presenter.kind != .company,
+           presenter.kind != .dropHint,
            presenter.kind != .study {
             renderBubbleContent()
         }
@@ -1286,7 +1435,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         switch presenter.kind {
         case .study:
             view.applyKind(.study)
-            view.setStudyCaption("看图去…")
+            view.setStudyCaption("我来看看")
+            return
+        case .dropHint:
+            view.applyKind(.dropHint)
+            view.setSimpleText("松手，我看图")
             return
         case .company:
             view.applyKind(.company)

@@ -17,6 +17,7 @@ enum BubbleKind {
     case company          // 忙久了说一句加油（0.2.0 floatcompany）
     case animation        // 手动播放的一段动画（气泡里只有动画）
     case study            // 拖图给小鲸鱼后的「看图去…」
+    case dropHint         // 拖拽悬停时的「松手，我看图」
 
     var autoHideSeconds: TimeInterval {
         switch self {
@@ -30,6 +31,7 @@ enum BubbleKind {
         case .company: return 6  // 一句加油，几秒就收
         case .animation: return 6
         case .study: return 5    // 「看图去」只是回执，看两眼就够
+        case .dropHint: return 0 // 悬停期间一直在，离开/松手才收
         }
     }
 
@@ -82,7 +84,7 @@ final class BubblePresenter {
         // 真正被解除（用户回答了 / 授权了）。
         // 注意不能靠 autoHideSeconds 的默认值来兜 —— 用户设的秒数优先级更高，
         // 会把这一豁免盖掉，于是泡在用户还在思考时就消失了。
-        guard newKind != .waiting else { return }
+        guard newKind != .waiting, newKind != .dropHint else { return }
 
         // 其余类型：用户设置的时长优先；未设时退回该类型的默认值
         let secs = autoHideSeconds > 0 ? autoHideSeconds : newKind.autoHideSeconds

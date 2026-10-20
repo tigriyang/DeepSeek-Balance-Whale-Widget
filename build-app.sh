@@ -25,7 +25,9 @@ VERSION="$(grep -rhoE 'static let version = "[^"]+"' "$HERE/Sources/WhaleFloat/"
 # 装到系统的 /Applications —— Finder 侧边栏「应用程序」指向的是这里，
 # 装到 ~/Applications 的话在侧边栏里看不到，也不符合拖进「应用程序」的直觉。
 # 普通用户对 /Applications 有写权限，不需要 sudo。
-DEST="/Applications/${APP_NAME}.app"
+# 默认装到 /Applications。设了 STAGE_DIR 就只组装到那个目录，不碰本机安装
+# —— 发版打包用这条路径，避免把 ad-hoc 签名的包覆盖到开发机上（会重置 TCC 权限）。
+DEST="${STAGE_DIR:-/Applications}/${APP_NAME}.app"
 
 echo "▸ 编译 release 版本…"
 cd "$HERE"
@@ -35,6 +37,9 @@ BIN="$(swift build -c release --show-bin-path)/${APP_NAME}"
 [ -x "$BIN" ] || { echo "✗ 找不到可执行文件 $BIN"; exit 1; }
 
 echo "▸ 组装 app bundle…"
+if [ -n "${STAGE_DIR:-}" ]; then
+  mkdir -p "$STAGE_DIR"
+fi
 rm -rf "$DEST"
 mkdir -p "$DEST/Contents/MacOS" "$DEST/Contents/Resources"
 
@@ -120,12 +125,12 @@ cat > "$DEST/Contents/Info.plist" <<PLIST
     <!-- 进 Dock，有图标（可在 Dock 上右键退出/切换） -->
     <key>LSUIElement</key><false/>
     <key>NSHighResolutionCapable</key><true/>
-    <!-- 读系统日历只为判断「今天是不是法定假日」。
-         没有这一项时系统不会弹授权框，而是直接拒绝。 -->
+    <!-- 日历只在用户此前已授权时读取；应用不主动申请，但这把钥匙仍要有，
+         否则 EventKit 读取会被直接拒绝。 -->
     <key>NSCalendarsUsageDescription</key>
-    <string>读取「中国大陆节假日」日历，用于判断当前是高峰还是低谷计价。只读节假日标记，不读你个人的日程。</string>
+    <string>仅在已授权时读取「中国大陆节假日」日历，用于判断峰谷计价；不主动申请，也不读个人日程。</string>
     <key>NSCalendarsFullAccessUsageDescription</key>
-    <string>读取「中国大陆节假日」日历，用于判断当前是高峰还是低谷计价。只读节假日标记，不读你个人的日程。</string>
+    <string>仅在已授权时读取「中国大陆节假日」日历，用于判断峰谷计价；不主动申请，也不读个人日程。</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
 </dict>
 </plist>

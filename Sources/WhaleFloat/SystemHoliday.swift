@@ -31,59 +31,18 @@ enum SystemHoliday {
 
     /// EKEventStore 不是 Sendable，但只在主线程用。
     nonisolated(unsafe) private static let store = EKEventStore()
-    /// 由 lock 保护 —— 授权回调在后台线程、查询在主线程。
-    nonisolated(unsafe) private static var authorized = false
-    nonisolated(unsafe) private static var asked = false
-    private static let stateLock = NSLock()
 
-    /// 确认访问权限。
+    /// **只读已有授权，不主动申请。**
     ///
-    /// **先查已有授权状态，已授权就不再请求** ——
-    /// 之前每次启动都无脑调 requestFullAccessToEvents，系统哪怕已经允许过
-    /// 也可能再弹一次框（尤其是二进制重新签名之后）。
-    static func requestAccessIfNeeded(completion: (@Sendable (Bool) -> Void)? = nil) {
-        stateLock.lock()
-        let alreadyAsked = asked
-        let alreadyAuthorized = authorized
-        if !alreadyAsked { asked = true }
-        stateLock.unlock()
-        if alreadyAsked { completion?(alreadyAuthorized); return }
-
-        let done: @Sendable (Bool) -> Void = { ok in
-            stateLock.lock()
-            authorized = ok
-            stateLock.unlock()
-            NSLog("WhaleFloat: 日历访问 \(ok ? "已允许" : "未获授权")")
-            DispatchQueue.main.async { completion?(ok) }
-        }
-
-        // 已有明确结论就直接用，不打扰用户
+    /// 这个壳不弹日历授权框：重新签名/覆盖安装会让 TCC 失效，
+    /// 每次都弹一次很烦。用户此前授权过就继续用系统日历校准；
+    /// 没授权就安静地走 HolidayCalendar（内置快照 + 联网更新）。
+    static var isAuthorized: Bool {
         let status = EKEventStore.authorizationStatus(for: .event)
         if #available(macOS 14.0, *) {
-            switch status {
-            case .fullAccess:
-                done(true); return
-            case .denied, .restricted, .writeOnly:
-                done(false); return
-            default:
-                break   // .notDetermined → 往下走，请求一次
-            }
+            return status == .fullAccess
         } else {
-            switch status {
-            case .authorized:
-                done(true); return
-            case .denied, .restricted:
-                done(false); return
-            default:
-                break
-            }
-        }
-
-        // 只有「还没决定」时才弹框
-        if #available(macOS 14.0, *) {
-            store.requestFullAccessToEvents { granted, _ in done(granted) }
-        } else {
-            store.requestAccess(to: .event) { granted, _ in done(granted) }
+            return status == .authorized
         }
     }
 
@@ -92,10 +51,7 @@ enum SystemHoliday {
     /// 返回 nil 表示「查不到」（没授权 / 没订阅节假日日历）——
     /// 调用方应当退回自己那份数据，而不是当成「不是假日」。
     static func isTodayHoliday() -> Bool? {
-        stateLock.lock()
-        let ok = authorized
-        stateLock.unlock()
-        guard ok else { return nil }
+        guard isAuthorized else { return nil }
         guard let cal = holidayCalendar() else { return nil }
 
         let now = Date()

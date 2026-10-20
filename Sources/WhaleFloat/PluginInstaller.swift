@@ -231,15 +231,29 @@ enum PluginInstaller {
 
     /// 从 DSH 的 profile 里摘除本程序带的插件（卸载时用）。
     static func removeAllQuietly() {
-        guard let dsh = dshExecutable else { return }
-        for name in bundled {
-            let p = Process()
-            p.executableURL = URL(fileURLWithPath: dsh)
-            p.arguments = ["plugin", "--profile", "web", "remove", name]
-            p.standardOutput = FileHandle.nullDevice
-            p.standardError = FileHandle.nullDevice
-            try? p.run()
-            p.waitUntilExit()
+        let fm = FileManager.default
+        let home = fm.homeDirectoryForCurrentUser
+        let names = bundled + legacy
+        // ① 先摘引用（dsh 在的话连 profile 里的依赖一起处理）
+        if let dsh = dshExecutable {
+            for name in names {
+                let p = Process()
+                p.executableURL = URL(fileURLWithPath: dsh)
+                p.arguments = ["plugin", "--profile", "web", "remove", name]
+                p.standardOutput = FileHandle.nullDevice
+                p.standardError = FileHandle.nullDevice
+                try? p.run()
+                p.waitUntilExit()
+            }
+        }
+        // ② 源码目录与 profile 副本：光摘引用会留下这两份。
+        //    菜单卸载以前只做①，重装时旧的源码还躺在 ~/.dsh/plugins 里，
+        //    跟 uninstall.sh 的行为对不上。
+        for name in names {
+            try? fm.removeItem(at: pluginsDir.appendingPathComponent(name))
+            let copy = home.appendingPathComponent(".dsh/profiles/web/node_modules")
+                .appendingPathComponent(name)
+            try? fm.removeItem(at: copy)
         }
     }
 

@@ -22,18 +22,12 @@ LABEL="ai.dsh.whalefloat"
 
 say() { printf '%s\n' "$*"; }
 
-uninstall() {
-  say "▸ 停止并移除自启…"
-  launchctl unload "$PLIST_DST" 2>/dev/null
-  rm -f "$PLIST_DST"
-  pkill -f "${APP_NAME}.app/Contents/MacOS" 2>/dev/null
-  say "▸ 删除应用…"
-  rm -rf "$APP"
-  say "✓ 已卸载（~/.dsh 下的配置与插件保留）"
-  exit 0
-}
+# 卸载统一交给 uninstall.sh，避免这里和它各有一套清理范围。
+# 以前这里只删应用与自启，~/.dsh 下的配置、插件、缓存全留下 ——
+# 于是「install.sh uninstall 再装」和「菜单卸载再装」得到两种结果。
+[ "${1:-}" = "uninstall" ] && shift && exec bash "$HERE/uninstall.sh" "$@"
 
-[ "${1:-}" = "uninstall" ] && uninstall
+
 
 # ── 前置检查 ────────────────────────────────────────────────
 say "▸ 检查环境…"
@@ -74,7 +68,7 @@ say "  应用位置   $APP"
 say "  配置       ~/.dsh/whalefloat.json"
 say "  角色素材   ~/.dsh/whalefloat-assets/（导入的图）"
 say ""
-say "  首次运行若弹出「安装 N 个配套插件」，点「安装」即可。"
-say "  那个插件挂在 DSH 上，负责等待提示、每轮消耗与系统通知；装完需重启一次 DSH。"
+say "  首次运行会自动装好配套插件（不弹框），DSH 在跑的话热更新即可生效。"
+say "  升级：下载新 dmg 覆盖安装即可，设置、素材、动画、账本都会保留。"
 say ""
 say "  退出：右键菜单栏的小鱼 →「退出浮窗」；连 DSH 一起关是「退出 DSH」"
