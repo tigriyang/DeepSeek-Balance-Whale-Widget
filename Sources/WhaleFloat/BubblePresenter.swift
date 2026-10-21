@@ -68,9 +68,24 @@ final class BubblePresenter {
         self.view = view
     }
 
+    /// 动画类气泡有不被打断的最小展示期。
+    ///
+    /// 以前谁都能顶谁：动画冒出来半秒，DSH 那边一轮结束冒「本轮消耗」，
+    /// 动画就被顶掉 —— 肉眼看到的是「它从来没播过」。现在动画显示期间，
+    /// 只给等待状态和预警让位，其余请求直接丢掉（本轮就不要了，不排队）。
+    private func canPreempt(_ current: BubbleKind, by newKind: BubbleKind) -> Bool {
+        switch current {
+        case .meal, .snack, .animation:
+            return newKind == .waiting || newKind == .alert
+        default:
+            return true
+        }
+    }
+
     /// 冒一个泡。若已有泡在显示则替换内容并重置计时。
     func show(_ newKind: BubbleKind) {
         guard newKind != .hidden else { hideNow(); return }
+        if kind != .hidden, kind != newKind, !canPreempt(kind, by: newKind) { return }
         // 旧的泡被顶掉时先让它收尾（比如把「干饭」动画停掉）
         if kind != .hidden, kind != newKind { onHide?(kind) }
         kind = newKind
